@@ -11,6 +11,7 @@
     "test": "vitest run",
     "db:migrate": "prisma migrate deploy",
     "db:seed": "node dist/seed.js",
+    "user:set-role": "node dist/scripts/set-user-role.js",
     "db:seed:dev": "tsx src/seed.ts"
   },
   "prisma": {

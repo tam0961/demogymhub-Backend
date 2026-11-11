@@ -90,3 +90,83 @@ reportsRouter.get('/daily-closing', authorizeAny('reports.view', 'reports.view_r
     },
   });
 });
+
+reportsRouter.get('/today-tasks', authorize('contracts.read'), async (req, res) => {
+  const p = q.parse(req.query);
+  const bf = branchFilter(req, p.branch_id);
+  const today = dateOnly(todayVN());
+  const LIMIT = 5;
+  const who = { member: { select: { name: true } } } as const;
+  const expWhere = { ...bf, status: 'active' as const, endDate: { gte: today, lte: addDays(today, 2) } };
+  const refundWhere = { ...bf, status: 'confirmed' as const, refundRequestedAt: { not: null }, refundedAt: null };
+
+  const [draftCount, drafts, unpaidRows, expCount, expiring, refundCount, refunds] = await Promise.all([
+    prisma.contract.count({ where: { ...bf, status: 'draft' } }),
+    prisma.contract.findMany({ where: { ...bf, status: 'draft' }, orderBy: { createdAt: 'asc' }, take: LIMIT, select: { id: true, code: true, ...who } }),
+    prisma.contract.findMany({
+      where: { ...bf, status: { in: ['signed', 'active', 'frozen'] } },
+      select: { id: true, code: true, totalAmount: true, paidAmount: true, ...who },
+    }),
+    prisma.contract.count({ where: expWhere }),
+    prisma.contract.findMany({
+      where: expWhere,
+      orderBy: [{ endDate: 'asc' }, { code: 'asc' }],
+      take: LIMIT,
+      select: { id: true, code: true, endDate: true, ...who },
+    }),
+    prisma.payment.count({ where: refundWhere }),
+    prisma.payment.findMany({
+      where: refundWhere,
+      orderBy: { refundRequestedAt: 'asc' },
+      take: LIMIT,
+      select: { id: true, amount: true, contract: { select: { code: true } } },
+    }),
+  ]);
+
+  const debtors = unpaidRows
+    .map((c) => ({ id: c.id, code: c.code, member_name: c.member.name, debt_amount: c.totalAmount - c.paidAmount }))
+    .filter((c) => c.debt_amount > 0)
+    .sort((a, b) => b.debt_amount - a.debt_amount);
+
+  res.json({
+    data: {
+      awaiting_signature: { count: draftCount, items: drafts.map((c) => ({ id: c.id, code: c.code, member_name: c.member.name })) },
+      unpaid: {
+        count: debtors.length,
+        total_debt: debtors.reduce((s, c) => s + c.debt_amount, 0),
+        items: debtors.slice(0, LIMIT),
+      },
+      expiring_in_2_days: {
+        count: expCount,
+        items: expiring.map((c) => ({ id: c.id, code: c.code, member_name: c.member.name, end_date: c.endDate!.toISOString().slice(0, 10) })),
+      },
+      pending_refunds: { count: refundCount, items: refunds.map((r) => ({ id: r.id, contract_code: r.contract.code, amount: r.amount })) },
+    },
+  });
+});
+
+reportsRouter.get('/checkin-stats', authorize('checkins.read'), async (req, res) => {
+  const p = q.parse(req.query);
+  const bf = branchFilter(req, p.branch_id);
+  const date = p.date ?? todayVN();
+  const [branches, rows] = await Promise.all([
+    prisma.branch.findMany({ where: bf.branchId ? { id: bf.branchId } : {}, orderBy: { code: 'asc' }, select: { id: true, code: true, name: true } }),
+    prisma.checkin.findMany({ where: { ...bf, checkedInAt: dayRange(date) }, select: { branchId: true, result: true, checkedInAt: true, checkedOutAt: true } }),
+  ]);
+  const out = branches.map((branch) => {
+    const mine = rows.filter((r) => r.branchId === branch.id);
+    const by = new Array<number>(24).fill(0);
+    for (const r of mine) if (r.result === 'allowed') by[new Date(r.checkedInAt.getTime() + 7 * 3600 * 1000).getUTCHours()]++;
+    return {
+      branch,
+      checkins_today: mine.filter((r) => r.result === 'allowed').length,
+      denied_today: mine.filter((r) => r.result === 'denied').length,
+      inside_now: mine.filter((r) => r.result === 'allowed' && !r.checkedOutAt).length,
+      by_hour: by.map((count, hour) => ({ hour, count })),
+    };
+  });
+  const sum = (k: 'checkins_today' | 'denied_today' | 'inside_now') => out.reduce((s, b) => s + b[k], 0);
+  res.json({
+    data: { date, branches: out, totals: { checkins_today: sum('checkins_today'), denied_today: sum('denied_today'), inside_now: sum('inside_now') } },
+  });
+});

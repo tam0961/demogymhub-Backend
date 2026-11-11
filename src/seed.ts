@@ -4,8 +4,9 @@ import { hashPassword } from './lib/crypto';
 import { PERMISSIONS, ROLES } from './modules/rbac/permissions';
 
 const BRANCHES = [
-  { code: 'nb', name: 'Ninh Binh' },
-  { code: 'q7', name: 'Quan 7' },
+  { code: 'q2', name: 'Chi nhánh Quận 2' },
+  { code: 'nb', name: 'Chi nhánh Nhà Bè' },
+  { code: 'q7', name: 'Chi nhánh Quận 7' },
 ];
 
 const DEMO: { email: string; name: string; role: string; branch: string | null }[] = [
@@ -56,12 +57,30 @@ async function ensureUser(prisma: PrismaClient, email: string, name: string, pas
   if (!has) await prisma.userRole.create({ data: { userId: user.id, roleId: role.id, branchId: branch?.id ?? null } });
 }
 
+export async function provisionOwner(
+  prisma: PrismaClient,
+  o: { email?: string; password?: string; name?: string },
+): Promise<'created' | 'exists' | 'skipped'> {
+  if (!o.email || !o.password) return 'skipped';
+  const email = o.email.toLowerCase();
+  if (await prisma.user.findUnique({ where: { email } })) return 'exists';
+  const user = await prisma.user.create({
+    data: { email, name: o.name || 'Chủ phòng gym', passwordHash: await hashPassword(o.password), emailVerified: true },
+  });
+  for (const key of ['owner', 'super_admin']) {
+    const role = await prisma.role.findUniqueOrThrow({ where: { key } });
+    await prisma.userRole.create({ data: { userId: user.id, roleId: role.id, branchId: null } });
+  }
+  return 'created';
+}
+
 export async function seedAll(prisma: PrismaClient) {
   await seedRbac(prisma);
   await seedBranches(prisma);
   if (config.SEED_ADMIN_PASSWORD) {
     await ensureUser(prisma, config.SEED_ADMIN_EMAIL.toLowerCase(), 'Super Admin', config.SEED_ADMIN_PASSWORD, 'super_admin', null);
   }
+  await provisionOwner(prisma, { email: config.SEED_OWNER_EMAIL, password: config.SEED_OWNER_PASSWORD, name: config.SEED_OWNER_NAME });
   if (config.SEED_DEMO === 'true') {
     const pw = config.SEED_DEMO_PASSWORD ?? 'Demo@12345';
     for (const d of DEMO) await ensureUser(prisma, d.email, d.name, pw, d.role, d.branch);

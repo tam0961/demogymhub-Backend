@@ -128,7 +128,7 @@ beforeAll(async () => {
   }
 });
 
-const matrix: { name: string; allowed: Role[]; call: (r: Role) => Promise<request.Response> }[] = [
+const matrix: { name: string; allowed: Role[]; viewOnly?: Role[]; call: (r: Role) => Promise<request.Response> }[] = [
   {
     name: 'POST /contracts',
     allowed: ['super_admin', 'owner', 'branch_manager', 'receptionist', 'sales'],
@@ -236,12 +236,14 @@ const matrix: { name: string; allowed: Role[]; call: (r: Role) => Promise<reques
   },
   {
     name: 'POST /checkins',
-    allowed: ['super_admin', 'owner', 'branch_manager', 'receptionist'],
+    allowed: ['branch_manager', 'receptionist'],
+    viewOnly: ['super_admin', 'owner'],
     call: async (r) => request(app).post('/api/checkins').set(h(r)).send({ member_id: (await mkMember()).id }),
   },
   {
     name: 'POST /checkins/:id/checkout',
-    allowed: ['super_admin', 'owner', 'branch_manager', 'receptionist'],
+    allowed: ['branch_manager', 'receptionist'],
+    viewOnly: ['super_admin', 'owner'],
     call: async (r) => {
       const m = await mkMember();
       const c = await prisma.checkin.create({ data: { memberId: m.id, branchId: nb, result: 'allowed' } });
@@ -252,7 +254,8 @@ const matrix: { name: string; allowed: Role[]; call: (r: Role) => Promise<reques
   { name: 'GET /checkins/live', allowed: ['super_admin', 'owner', 'branch_manager', 'receptionist'], call: async (r) => request(app).get('/api/checkins/live').set(h(r)) },
   {
     name: 'POST /checkins/override',
-    allowed: ['super_admin', 'owner', 'branch_manager'],
+    allowed: ['branch_manager'],
+    viewOnly: ['super_admin', 'owner'],
     call: async (r) => request(app).post('/api/checkins/override').set(h(r)).send({ member_id: (await mkMember()).id, reason: 'manager approved' }),
   },
   { name: 'GET /reports/dashboard', allowed: ['super_admin', 'owner', 'branch_manager'], call: async (r) => request(app).get('/api/reports/dashboard').set(h(r)) },
@@ -290,12 +293,16 @@ describe('role x endpoint matrix (MVP)', () => {
     describe(row.name, () => {
       for (const role of ROLES) {
         const allowed = row.allowed.includes(role);
+        const viewOnly = row.viewOnly?.includes(role);
         it(`${role} -> ${allowed ? '2xx' : '403'}`, async () => {
           const before = await prisma.accessAudit.count({ where: { actorId: ids[role], action: 'permission.checked.denied' } });
           const res = await row.call(role);
           if (allowed) {
             expect(res.status, JSON.stringify(res.body)).toBeGreaterThanOrEqual(200);
             expect(res.status).toBeLessThan(300);
+          } else if (viewOnly) {
+            expect(res.status).toBe(403);
+            expect(res.body.error.code).toBe('VIEW_ONLY');
           } else {
             expect(res.status).toBe(403);
             expect(res.body.error.code).toBe('FORBIDDEN');
@@ -783,7 +790,10 @@ describe('admin endpoints', () => {
     const keys = roles.body.data.map((r: { key: string }) => r.key);
     expect(keys).toEqual(expect.arrayContaining(ROLES));
     const owner = roles.body.data.find((r: { key: string }) => r.key === 'owner');
-    expect(owner.permissions).toEqual(expect.arrayContaining(['payments.refund', 'contracts.activate', 'contracts.freeze', 'payments.confirm', 'shifts.open', 'checkins.override']));
+    expect(owner.permissions).toEqual(expect.arrayContaining(['payments.refund', 'contracts.activate', 'contracts.freeze', 'payments.confirm', 'shifts.open']));
+    expect(owner.permissions).not.toEqual(expect.arrayContaining(['checkins.create']));
+    expect(owner.permissions).not.toContain('checkins.override');
+    expect(owner.permissions).not.toContain('contracts.override_checkin');
     const mgr = roles.body.data.find((r: { key: string }) => r.key === 'branch_manager');
     expect(mgr.permissions).not.toContain('payments.refund');
     const rec = roles.body.data.find((r: { key: string }) => r.key === 'receptionist');

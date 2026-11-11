@@ -9,7 +9,7 @@ import { authenticate, authorize } from '../../middlewares/auth';
 import { branchFilter } from '../rbac/scope';
 import { branchAllowed, can } from '../rbac/service';
 import { contractPdf } from './pdf';
-import { addEvent, contractToApi, lockContract, syncMemberStatus, type Tx } from './service';
+import { addEvent, contractToApi, lastPaymentMethods, lockContract, syncMemberStatus, type Tx } from './service';
 
 export const contractsRouter = Router();
 contractsRouter.use(authenticate);
@@ -117,23 +117,25 @@ contractsRouter.get('/', authorize('contracts.read'), async (req, res) => {
     prisma.contract.count({ where }),
     prisma.contract.findMany({
       where,
-      include: { member: true, package: true },
+      include: { member: true, package: true, branch: true },
       orderBy: { createdAt: 'desc' },
       skip: (q.page - 1) * q.limit,
       take: q.limit,
     }),
   ]);
-  res.json({ data: rows.map(contractToApi), meta: { page: q.page, limit: q.limit, total } });
+  const lpm = await lastPaymentMethods(rows.map((r) => r.id));
+  res.json({ data: rows.map((r) => contractToApi(r, { branch: r.branch, last_payment_method: lpm.get(r.id) ?? null })), meta: { page: q.page, limit: q.limit, total } });
 });
 
 contractsRouter.get('/:id', authorize('contracts.read'), async (req, res) => {
   const id = uuid.parse(req.params.id);
   const c = await prisma.contract.findUnique({
     where: { id },
-    include: { member: true, package: true, events: { orderBy: { createdAt: 'asc' } }, payments: { orderBy: { createdAt: 'asc' } } },
+    include: { member: true, package: true, branch: true, events: { orderBy: { createdAt: 'asc' } }, payments: { orderBy: { createdAt: 'asc' } } },
   });
   if (!c || !branchAllowed(req.access!, c.branchId)) throw notFound('Contract not found');
-  res.json({ data: contractToApi(c) });
+  const lpm = await lastPaymentMethods([c.id]);
+  res.json({ data: contractToApi(c, { branch: c.branch, last_payment_method: lpm.get(c.id) ?? null }) });
 });
 
 contractsRouter.get('/:id/pdf', authorize('contracts.read'), async (req, res) => {

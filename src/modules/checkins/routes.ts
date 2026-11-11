@@ -8,13 +8,12 @@ import { prisma } from '../../lib/prisma';
 import { authenticate, authorize, authorizeAny } from '../../middlewares/auth';
 import { contractToApi, lockContract } from '../contracts/service';
 import { branchFilter } from '../rbac/scope';
-import { branchAllowed } from '../rbac/service';
+import { denyViewOnly, requireBranchStaff } from './guard';
 
 export const checkinsRouter = Router();
 checkinsRouter.use(authenticate);
 
 const uuid = z.string().uuid();
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const memberRef = z
   .object({ member_id: uuid.optional(), member_code: z.string().trim().min(1).max(64).optional() })
@@ -36,10 +35,7 @@ const checkinApi = (c: Checkin & { member?: Member }) => ({
   deducted: c.deducted,
 });
 
-const header = (req: Request) => {
-  const h = req.header('x-branch-id');
-  return h && UUID_RE.test(h) && branchAllowed(req.access!, h) ? h : undefined;
-};
+const branchInfo = (id: string) => prisma.branch.findUniqueOrThrow({ where: { id }, select: { id: true, code: true, name: true } });
 
 async function findMember(req: Request, b: z.infer<typeof memberRef>) {
   const m = await prisma.member.findFirst({ where: b.member_id ? { id: b.member_id } : { code: b.member_code } });
@@ -57,14 +53,9 @@ async function logDenied(req: Request, m: Member, branchId: string, reason: stri
   return { result: 'denied', reason, contract, checkinId: c.id };
 }
 
-async function evaluate(req: Request, m: Member): Promise<Outcome> {
+async function evaluate(req: Request, m: Member, branchId: string): Promise<Outcome> {
   const userId = req.auth!.userId;
-  const hdr = header(req);
-  const wrong = hdr ? hdr !== m.branchId : !branchAllowed(req.access!, m.branchId);
-  if (wrong) {
-    const logBranch = hdr ?? req.access!.branchIds[0] ?? m.branchId;
-    return logDenied(req, m, logBranch, 'WRONG_BRANCH', null);
-  }
+  if (m.branchId !== branchId) return logDenied(req, m, branchId, 'WRONG_BRANCH', null);
   const today = dateOnly(todayVN());
 
   const inside = await prisma.checkin.findFirst({
@@ -128,17 +119,20 @@ async function evaluate(req: Request, m: Member): Promise<Outcome> {
   return logDenied(req, m, m.branchId, 'NO_ACTIVE_CONTRACT', null);
 }
 
-const respond = (m: Member, o: Outcome) => ({
+const respond = (m: Member, o: Outcome, branch: { id: string; code: string; name: string }) => ({
   data: {
     result: o.result,
     reason: o.reason,
     member: memberApi(m),
     contract: o.contract ? contractToApi(o.contract) : null,
     checkin_id: o.checkinId,
+    branch,
   },
 });
 
-checkinsRouter.post('/', authorize('checkins.create'), async (req, res) => {
+checkinsRouter.post('/', denyViewOnly, authorize('checkins.create'), async (req, res) => {
+  const branchId = requireBranchStaff(req);
+  const branch = await branchInfo(branchId);
   const b = memberRef.and(z.object({ direction: z.enum(['in', 'out']).default('in') })).parse(req.body);
   const m = await findMember(req, b);
   if (b.direction === 'out') {
@@ -147,36 +141,39 @@ checkinsRouter.post('/', authorize('checkins.create'), async (req, res) => {
       orderBy: { checkedInAt: 'desc' },
       include: { contract: true },
     });
-    if (!open || !branchAllowed(req.access!, open.branchId)) {
-      return res.json({ data: { result: 'denied', reason: 'NOT_CHECKED_IN', member: memberApi(m), contract: null, checkin_id: null } });
+    if (!open || open.branchId !== branchId) {
+      return res.json({ data: { result: 'denied', reason: 'NOT_CHECKED_IN', member: memberApi(m), contract: null, checkin_id: null, branch } });
     }
     await prisma.checkin.updateMany({ where: { id: open.id, checkedOutAt: null }, data: { checkedOutAt: new Date() } });
-    return res.json(respond(m, { result: 'allowed', reason: null, contract: open.contract, checkinId: open.id }));
+    return res.json(respond(m, { result: 'allowed', reason: null, contract: open.contract, checkinId: open.id }, branch));
   }
-  res.json(respond(m, await evaluate(req, m)));
+  res.json(respond(m, await evaluate(req, m, branchId), branch));
 });
 
 checkinsRouter.post(
   '/override',
+  denyViewOnly,
   authorizeAny('checkins.override', 'contracts.override_checkin'),
   async (req, res) => {
+    const branchId = requireBranchStaff(req);
     const b = z.object({ member_id: uuid, reason: z.string().trim().min(3).max(500) }).parse(req.body);
     const m = await prisma.member.findUnique({ where: { id: b.member_id } });
-    if (!m || !branchAllowed(req.access!, m.branchId)) throw notFound('Member not found');
+    if (!m || m.branchId !== branchId) throw notFound('Member not found');
     const userId = req.auth!.userId;
     const contract = await prisma.contract.findFirst({ where: { memberId: m.id, branchId: m.branchId }, orderBy: { createdAt: 'desc' } });
     const c = await prisma.checkin.create({
       data: { memberId: m.id, contractId: contract?.id ?? null, branchId: m.branchId, result: 'allowed', reason: b.reason, overrideBy: userId, createdBy: userId },
     });
     await audit(userId, 'checkin.override', { member_id: m.id, checkin_id: c.id, reason: b.reason }, req.ip, c.id);
-    res.json(respond(m, { result: 'allowed', reason: b.reason, contract, checkinId: c.id }));
+    res.json(respond(m, { result: 'allowed', reason: b.reason, contract, checkinId: c.id }, await branchInfo(branchId)));
   },
 );
 
-checkinsRouter.post('/:id/checkout', authorize('checkins.create'), async (req, res) => {
+checkinsRouter.post('/:id/checkout', denyViewOnly, authorize('checkins.create'), async (req, res) => {
+  const branchId = requireBranchStaff(req);
   const id = uuid.parse(req.params.id);
   const c = await prisma.checkin.findUnique({ where: { id }, include: { member: true } });
-  if (!c || !branchAllowed(req.access!, c.branchId)) throw notFound('Check-in not found');
+  if (!c || c.branchId !== branchId) throw notFound('Check-in not found');
   if (c.result !== 'allowed') throw notFound('Check-in not found');
   await prisma.checkin.updateMany({ where: { id, checkedOutAt: null }, data: { checkedOutAt: new Date() } });
   const fresh = await prisma.checkin.findUniqueOrThrow({ where: { id }, include: { member: true } });

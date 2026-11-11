@@ -40,6 +40,9 @@ const OPS = [
   'checkins.override',
 ];
 
+const VIEW_ONLY_REMOVED = ['contracts.override_checkin', 'checkins.create', 'checkins.override'];
+const OWNER_OPS = OPS.filter((p) => !VIEW_ONLY_REMOVED.includes(p));
+
 export interface RoleDef {
   key: string;
   name: string;
@@ -57,7 +60,7 @@ export const ROLES: RoleDef[] = [
       ...expand('members', CRUD),
       ...expand('packages', ['create', 'read', 'update']),
       ...expand('reports', ['view', 'view_revenue', 'export']),
-      ...OPS,
+      ...OWNER_OPS,
       'payments.refund',
       'roles.read',
       'roles.assign',

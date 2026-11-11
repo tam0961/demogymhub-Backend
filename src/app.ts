@@ -12,6 +12,7 @@ import { authRouter } from './modules/auth/routes';
 import { membersRouter } from './modules/members/routes';
 import { packagesRouter } from './modules/packages/routes';
 import { adminRouter } from './modules/admin/routes';
+import { canCheckin } from './modules/checkins/guard';
 import { checkinsRouter } from './modules/checkins/routes';
 import { contractsRouter } from './modules/contracts/routes';
 import { paymentsRouter } from './modules/payments/routes';
@@ -62,8 +63,10 @@ export function createApp() {
       orderBy: { code: 'asc' },
       select: { id: true, code: true, name: true },
     });
+    const can_checkin = canCheckin(a);
+    const checkin_branch = can_checkin && a.branchIds.length === 1 ? (branches.find((b) => b.id === a.branchIds[0]) ?? null) : null;
     res.json({
-      data: { id: user.id, email: user.email, name: user.name, roles: a.roles, permissions: a.permissions, branches },
+      data: { id: user.id, email: user.email, name: user.name, roles: a.roles, permissions: a.permissions, branches, can_checkin, checkin_branch },
     });
   });
 
