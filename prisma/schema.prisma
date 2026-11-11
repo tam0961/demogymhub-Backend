@@ -1,0 +1,376 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum MemberStatus {
+  active
+  expired
+  frozen
+}
+
+enum PackageType {
+  day
+  month
+  session
+}
+
+enum ContractStatus {
+  draft
+  signed
+  active
+  frozen
+  expired
+  cancelled
+}
+
+enum PaymentStatus {
+  pending
+  confirmed
+  failed
+  refunded
+}
+
+enum PaymentMethod {
+  cash
+  transfer
+  vietqr
+  ewallet
+}
+
+enum AuthTokenKind {
+  email_verify
+  password_reset
+}
+
+model Branch {
+  id        String   @id @default(uuid()) @db.Uuid
+  code      String   @unique
+  name      String
+  address   String?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  userRoles UserRole[]
+  members   Member[]
+  packages  Package[]
+  contracts Contract[]
+  payments  Payment[]
+  shifts    Shift[]
+  checkins  Checkin[]
+
+  @@map("branches")
+}
+
+model User {
+  id            String    @id @default(uuid()) @db.Uuid
+  email         String    @unique
+  name          String
+  passwordHash  String    @map("password_hash")
+  emailVerified Boolean   @default(false) @map("email_verified")
+  status        String    @default("active")
+  tokenVersion  Int       @default(0) @map("token_version")
+  failedLogins  Int       @default(0) @map("failed_logins")
+  lockedUntil   DateTime? @map("locked_until") @db.Timestamptz
+  lastLoginAt   DateTime? @map("last_login_at") @db.Timestamptz
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  refreshTokens RefreshToken[]
+  authTokens    AuthToken[]
+  userRoles     UserRole[]    @relation("UserRoleUser")
+  granted       UserRole[]    @relation("UserRoleGrantedBy")
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  tokenHash String    @map("token_hash")
+  familyId  String    @map("family_id") @db.Uuid
+  jti       String    @db.Uuid
+  userAgent String?   @map("user_agent")
+  ip        String?
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz
+  used      Boolean   @default(false)
+  usedAt    DateTime? @map("used_at") @db.Timestamptz
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([tokenHash])
+  @@index([familyId])
+  @@map("refresh_tokens")
+}
+
+model AuthToken {
+  id        String        @id @default(uuid()) @db.Uuid
+  userId    String        @map("user_id") @db.Uuid
+  kind      AuthTokenKind
+  tokenHash String        @map("token_hash")
+  expiresAt DateTime      @map("expires_at") @db.Timestamptz
+  usedAt    DateTime?     @map("used_at") @db.Timestamptz
+  createdAt DateTime      @default(now()) @map("created_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([tokenHash])
+  @@map("auth_tokens")
+}
+
+model Role {
+  id          Int     @id @default(autoincrement())
+  key         String  @unique
+  name        String
+  description String?
+  isSystem    Boolean @default(false) @map("is_system")
+
+  rolePermissions RolePermission[]
+  userRoles       UserRole[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id          Int     @id @default(autoincrement())
+  key         String  @unique
+  resource    String
+  action      String
+  description String?
+
+  rolePermissions RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       Int @map("role_id")
+  permissionId Int @map("permission_id")
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model UserRole {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  roleId    Int       @map("role_id")
+  branchId  String?   @map("branch_id") @db.Uuid
+  grantedBy String?   @map("granted_by") @db.Uuid
+  grantedAt DateTime  @default(now()) @map("granted_at") @db.Timestamptz
+  expiresAt DateTime? @map("expires_at") @db.Timestamptz
+
+  user    User    @relation("UserRoleUser", fields: [userId], references: [id], onDelete: Cascade)
+  role    Role    @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  branch  Branch? @relation(fields: [branchId], references: [id])
+  granter User?   @relation("UserRoleGrantedBy", fields: [grantedBy], references: [id])
+
+  @@unique([userId, roleId, branchId])
+  @@index([userId])
+  @@map("user_roles")
+}
+
+model AccessAudit {
+  id        BigInt   @id @default(autoincrement())
+  actorId   String?  @map("actor_id") @db.Uuid
+  targetId  String?  @map("target_id")
+  action    String
+  metadata  Json?
+  ip        String?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([actorId, createdAt(sort: Desc)])
+  @@index([action, createdAt(sort: Desc)])
+  @@map("access_audit")
+}
+
+model Member {
+  id        String       @id @default(uuid()) @db.Uuid
+  code      String       @unique
+  name      String
+  phone     String       @unique
+  email     String?
+  gender    String?
+  dob       DateTime?    @db.Date
+  status    MemberStatus @default(active)
+  branchId  String       @map("branch_id") @db.Uuid
+  avatarUrl String?      @map("avatar_url")
+  createdAt DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime     @updatedAt @map("updated_at") @db.Timestamptz
+
+  branch    Branch     @relation(fields: [branchId], references: [id])
+  contracts Contract[]
+  checkins  Checkin[]
+
+  @@index([branchId])
+  @@index([status])
+  @@map("members")
+}
+
+model Package {
+  id           String      @id @default(uuid()) @db.Uuid
+  name         String
+  type         PackageType
+  durationDays Int?        @map("duration_days")
+  sessions     Int?
+  price        Int
+  vatPercent   Int         @default(0) @map("vat_percent")
+  branchId     String      @map("branch_id") @db.Uuid
+  active       Boolean     @default(true)
+  createdAt    DateTime    @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime    @updatedAt @map("updated_at") @db.Timestamptz
+
+  branch    Branch     @relation(fields: [branchId], references: [id])
+  contracts Contract[]
+
+  @@index([branchId])
+  @@map("packages")
+}
+
+model Contract {
+  id            String         @id @default(uuid()) @db.Uuid
+  code          String         @unique
+  memberId      String         @map("member_id") @db.Uuid
+  packageId     String         @map("package_id") @db.Uuid
+  branchId      String         @map("branch_id") @db.Uuid
+  status        ContractStatus @default(draft)
+  totalAmount   Int            @map("total_amount")
+  discount      Int            @default(0)
+  paidAmount    Int            @default(0) @map("paid_amount")
+  durationDays  Int?           @map("duration_days")
+  startDate     DateTime?      @map("start_date") @db.Date
+  endDate       DateTime?      @map("end_date") @db.Date
+  sessionsTotal Int?           @map("sessions_total")
+  sessionsLeft  Int?           @map("sessions_left")
+  signedAt      DateTime?      @map("signed_at") @db.Timestamptz
+  signatureData String?        @map("signature_data")
+  activatedAt   DateTime?      @map("activated_at") @db.Timestamptz
+  frozenUntil   DateTime?      @map("frozen_until") @db.Date
+  renewedFromId String?        @map("renewed_from_id") @db.Uuid
+  note          String?
+  createdBy     String?        @map("created_by") @db.Uuid
+  createdAt     DateTime       @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime       @updatedAt @map("updated_at") @db.Timestamptz
+
+  member   Member          @relation(fields: [memberId], references: [id])
+  package  Package         @relation(fields: [packageId], references: [id])
+  branch   Branch          @relation(fields: [branchId], references: [id])
+  events   ContractEvent[]
+  payments Payment[]
+  checkins Checkin[]
+
+  @@index([memberId])
+  @@index([branchId, status])
+  @@index([endDate])
+  @@map("contracts")
+}
+
+model ContractEvent {
+  id         String   @id @default(uuid()) @db.Uuid
+  contractId String   @map("contract_id") @db.Uuid
+  type       String
+  byUser     String?  @map("by_user") @db.Uuid
+  reason     String?
+  diff       Json?
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  contract Contract @relation(fields: [contractId], references: [id])
+
+  @@index([contractId, createdAt])
+  @@map("contract_events")
+}
+
+model Shift {
+  id           String    @id @default(uuid()) @db.Uuid
+  userId       String    @map("user_id") @db.Uuid
+  branchId     String    @map("branch_id") @db.Uuid
+  openedAt     DateTime  @default(now()) @map("opened_at") @db.Timestamptz
+  closedAt     DateTime? @map("closed_at") @db.Timestamptz
+  openingCash  Int       @map("opening_cash")
+  expectedCash Int?      @map("expected_cash")
+  countedCash  Int?      @map("counted_cash")
+  difference   Int?
+  totals       Json?
+
+  branch   Branch    @relation(fields: [branchId], references: [id])
+  payments Payment[] @relation("PaymentShift")
+
+  @@index([userId, closedAt])
+  @@index([branchId])
+  @@map("shifts")
+}
+
+model Payment {
+  id                String        @id @default(uuid()) @db.Uuid
+  contractId        String        @map("contract_id") @db.Uuid
+  branchId          String        @map("branch_id") @db.Uuid
+  method            PaymentMethod
+  amount            Int
+  status            PaymentStatus @default(pending)
+  ref               String        @unique
+  shiftId           String?       @map("shift_id") @db.Uuid
+  refundShiftId     String?       @map("refund_shift_id") @db.Uuid
+  note              String?
+  createdBy         String?       @map("created_by") @db.Uuid
+  createdAt         DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  confirmedAt       DateTime?     @map("confirmed_at") @db.Timestamptz
+  confirmedBy       String?       @map("confirmed_by") @db.Uuid
+  refundRequestedAt DateTime?     @map("refund_requested_at") @db.Timestamptz
+  refundRequestedBy String?       @map("refund_requested_by") @db.Uuid
+  refundReason      String?       @map("refund_reason")
+  refundedAt        DateTime?     @map("refunded_at") @db.Timestamptz
+  refundedBy        String?       @map("refunded_by") @db.Uuid
+
+  contract Contract @relation(fields: [contractId], references: [id])
+  branch   Branch   @relation(fields: [branchId], references: [id])
+  shift    Shift?   @relation("PaymentShift", fields: [shiftId], references: [id])
+
+  @@index([contractId])
+  @@index([branchId, confirmedAt])
+  @@index([shiftId])
+  @@map("payments")
+}
+
+model PaymentWebhookDelivery {
+  id          String   @id @default(uuid()) @db.Uuid
+  ref         String?
+  amount      Int?
+  statusIn    String?  @map("status_in")
+  signatureOk Boolean  @map("signature_ok")
+  result      String
+  ip          String?
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@map("payment_webhook_deliveries")
+}
+
+model Checkin {
+  id           String    @id @default(uuid()) @db.Uuid
+  memberId     String    @map("member_id") @db.Uuid
+  contractId   String?   @map("contract_id") @db.Uuid
+  branchId     String    @map("branch_id") @db.Uuid
+  result       String
+  reason       String?
+  checkedInAt  DateTime  @default(now()) @map("checked_in_at") @db.Timestamptz
+  checkedOutAt DateTime? @map("checked_out_at") @db.Timestamptz
+  overrideBy   String?   @map("override_by") @db.Uuid
+  deducted     Boolean   @default(false)
+  deductedDay  DateTime? @map("deducted_day") @db.Date
+  createdBy    String?   @map("created_by") @db.Uuid
+
+  member   Member    @relation(fields: [memberId], references: [id])
+  contract Contract? @relation(fields: [contractId], references: [id])
+  branch   Branch    @relation(fields: [branchId], references: [id])
+
+  @@unique([contractId, deductedDay])
+  @@index([branchId, checkedInAt])
+  @@index([memberId, checkedInAt])
+  @@map("checkins")
+}
