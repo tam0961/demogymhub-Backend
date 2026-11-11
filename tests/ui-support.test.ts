@@ -216,3 +216,25 @@ describe('GET /reports/today-tasks', () => {
     expect(cross.status).toBe(403);
   });
 });
+
+describe('payments expose contract code and member name', () => {
+  it('payments list and daily closing include contract.code and contract.member.name', async () => {
+    const m = await mkMember(A, 'Nguyen Van Test');
+    const c = await mkContract(m.id, A, { status: 'active' });
+    const p = await prisma.payment.create({
+      data: { contractId: c.id, branchId: A, method: 'cash', amount: 7000, status: 'confirmed', ref: `R${uniq()}`, confirmedAt: new Date() },
+    });
+
+    const list = await request(app).get(`/api/payments?contract_id=${c.id}`).set(hA('branch_manager'));
+    expect(list.status).toBe(200);
+    const row = list.body.data.find((x: { id: string }) => x.id === p.id);
+    expect(row.contract).toEqual({ id: c.id, code: c.code, member: { name: 'Nguyen Van Test' } });
+    expect(row.refund_requested).toBe(false);
+
+    const closing = await request(app).get('/api/reports/daily-closing').set(hA('branch_manager'));
+    expect(closing.status).toBe(200);
+    const tx = closing.body.data.transactions.find((x: { id: string }) => x.id === p.id);
+    expect(tx.contract.code).toBe(c.code);
+    expect(tx.contract.member.name).toBe('Nguyen Van Test');
+  });
+});

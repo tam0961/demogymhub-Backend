@@ -40,7 +40,9 @@ export async function syncMemberStatus(tx: Tx, memberId: string) {
 
 type Full = Contract & { member?: Member; package?: Package; events?: ContractEvent[]; payments?: Payment[] };
 
-export const paymentToApi = (p: Payment) => ({
+type PaymentWithContract = Payment & { contract?: { id: string; code: string; member?: { name: string } | null } | null };
+
+export const paymentToApi = (p: PaymentWithContract) => ({
   id: p.id,
   contract_id: p.contractId,
   method: p.method,
@@ -55,6 +57,8 @@ export const paymentToApi = (p: Payment) => ({
   refund_requested_at: p.refundRequestedAt,
   refund_reason: p.refundReason,
   refunded_at: p.refundedAt,
+  refund_requested: !!p.refundRequestedAt && !p.refundedAt,
+  ...(p.contract && { contract: { id: p.contract.id, code: p.contract.code, ...(p.contract.member && { member: { name: p.contract.member.name } }) } }),
 });
 
 type Extra = { branch?: { id: string; code: string; name: string } | null; last_payment_method?: string | null };

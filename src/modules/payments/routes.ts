@@ -184,7 +184,7 @@ paymentsRouter.get('/', authorize('payments.read'), async (req, res) => {
   if (q.date) where.createdAt = dayRange(q.date);
   const [total, rows] = await Promise.all([
     prisma.payment.count({ where }),
-    prisma.payment.findMany({ where, orderBy: { createdAt: 'desc' }, skip: (q.page - 1) * q.limit, take: q.limit }),
+    prisma.payment.findMany({ where, orderBy: { createdAt: 'desc' }, skip: (q.page - 1) * q.limit, take: q.limit, include: { contract: { select: { id: true, code: true, member: { select: { name: true } } } } } }),
   ]);
   res.json({ data: rows.map(paymentToApi), meta: { page: q.page, limit: q.limit, total } });
 });

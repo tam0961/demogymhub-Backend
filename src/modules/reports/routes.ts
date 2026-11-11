@@ -77,7 +77,7 @@ reportsRouter.get('/daily-closing', authorizeAny('reports.view', 'reports.view_r
     status: 'confirmed',
     confirmedAt: dayRange(p.date ?? todayVN()),
   };
-  const rows = await prisma.payment.findMany({ where, orderBy: { confirmedAt: 'asc' } });
+  const rows = await prisma.payment.findMany({ where, orderBy: { confirmedAt: 'asc' }, include: { contract: { select: { id: true, code: true, member: { select: { name: true } } } } } });
   const byMethod = zeroByMethod();
   for (const r of rows) byMethod[r.method] += r.amount;
   res.json({
