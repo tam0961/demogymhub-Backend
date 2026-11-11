@@ -238,3 +238,16 @@ describe('payments expose contract code and member name', () => {
     expect(tx.contract.member.name).toBe('Nguyen Van Test');
   });
 });
+
+describe('contract events expose actor name', () => {
+  it('detail events include by_user_name', async () => {
+    const m = await mkMember(A);
+    const c = await mkContract(m.id, A, { status: 'signed' });
+    await prisma.contractEvent.create({ data: { contractId: c.id, type: 'signed', byUser: ids.receptionist } });
+    const who = await prisma.user.findUniqueOrThrow({ where: { id: ids.receptionist }, select: { name: true } });
+    const d = await request(app).get(`/api/contracts/${c.id}`).set(hA('receptionist'));
+    expect(d.status).toBe(200);
+    expect(d.body.data.events[0].by_user).toBe(ids.receptionist);
+    expect(d.body.data.events[0].by_user_name).toBe(who.name);
+  });
+});

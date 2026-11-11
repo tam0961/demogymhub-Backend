@@ -135,7 +135,9 @@ contractsRouter.get('/:id', authorize('contracts.read'), async (req, res) => {
   });
   if (!c || !branchAllowed(req.access!, c.branchId)) throw notFound('Contract not found');
   const lpm = await lastPaymentMethods([c.id]);
-  res.json({ data: contractToApi(c, { branch: c.branch, last_payment_method: lpm.get(c.id) ?? null }) });
+  const actorIds = [...new Set(c.events.map((e) => e.byUser).filter((x): x is string => !!x))];
+  const actors = actorIds.length ? await prisma.user.findMany({ where: { id: { in: actorIds } }, select: { id: true, name: true } }) : [];
+  res.json({ data: contractToApi(c, { branch: c.branch, last_payment_method: lpm.get(c.id) ?? null, user_names: new Map(actors.map((u) => [u.id, u.name])) }) });
 });
 
 contractsRouter.get('/:id/pdf', authorize('contracts.read'), async (req, res) => {

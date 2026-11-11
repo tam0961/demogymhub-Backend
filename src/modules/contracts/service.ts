@@ -61,7 +61,7 @@ export const paymentToApi = (p: PaymentWithContract) => ({
   ...(p.contract && { contract: { id: p.contract.id, code: p.contract.code, ...(p.contract.member && { member: { name: p.contract.member.name } }) } }),
 });
 
-type Extra = { branch?: { id: string; code: string; name: string } | null; last_payment_method?: string | null };
+type Extra = { branch?: { id: string; code: string; name: string } | null; last_payment_method?: string | null; user_names?: Map<string, string> };
 
 export async function lastPaymentMethods(contractIds: string[]) {
   const out = new Map<string, string>();
@@ -163,7 +163,7 @@ export function contractToApi(c: Full, extra: Extra = {}) {
     ...(c.member && { member: { id: c.member.id, code: c.member.code, name: c.member.name, phone: c.member.phone } }),
     ...(c.package && { package: { id: c.package.id, name: c.package.name, type: c.package.type } }),
     ...(c.events && {
-      events: c.events.map((e) => ({ id: e.id, type: e.type, by_user: e.byUser, reason: e.reason, diff: e.diff, created_at: e.createdAt })),
+      events: c.events.map((e) => ({ id: e.id, type: e.type, by_user: e.byUser, by_user_name: (e.byUser && extra.user_names?.get(e.byUser)) || null, reason: e.reason, diff: e.diff, created_at: e.createdAt })),
     }),
     ...(c.payments && { payments: c.payments.map(paymentToApi) }),
     ...(extra.branch && { branch: { id: extra.branch.id, code: extra.branch.code, name: extra.branch.name } }),
