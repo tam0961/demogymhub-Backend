@@ -202,12 +202,14 @@ model Member {
   status    MemberStatus @default(active)
   branchId  String       @map("branch_id") @db.Uuid
   avatarUrl String?      @map("avatar_url")
+  faceId    String?      @unique @map("face_id")
   createdAt DateTime     @default(now()) @map("created_at") @db.Timestamptz
   updatedAt DateTime     @updatedAt @map("updated_at") @db.Timestamptz
 
   branch    Branch     @relation(fields: [branchId], references: [id])
   contracts Contract[]
   checkins  Checkin[]
+  photo     MemberPhoto?
 
   @@index([branchId])
   @@index([status])
@@ -373,4 +375,15 @@ model Checkin {
   @@index([branchId, checkedInAt])
   @@index([memberId, checkedInAt])
   @@map("checkins")
+}
+
+model MemberPhoto {
+  memberId    String   @id @map("member_id") @db.Uuid
+  contentType String   @map("content_type")
+  data        Bytes
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  member Member @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@map("member_photos")
 }

@@ -21,6 +21,10 @@ const createSchema = z.object({
   member_id: uuid,
   package_id: uuid,
   discount: z.number().int().min(0).default(0),
+  promo: z
+    .object({ type: z.enum(['bonus_months', 'bonus_days', 'bonus_sessions', 'percent', 'amount']), value: z.number().int().min(1) })
+    .nullish(),
+  renewed_from_id: uuid.nullish(),
   note: z.string().trim().max(500).nullish(),
 });
 const listSchema = z.object({
@@ -56,8 +60,35 @@ async function snapshot(memberId: string, packageId: string, discount: number) {
   return { member, pkg, discount };
 }
 
+const grossOf = (pkg: { price: number; vatPercent: number }) => pkg.price + Math.round((pkg.price * pkg.vatPercent) / 100);
+
+function applyPromo(
+  pkg: { price: number; vatPercent: number; durationDays: number | null; sessions: number | null },
+  discount: number,
+  promo: { type: string; value: number } | null | undefined,
+) {
+  let d = discount;
+  let duration = pkg.durationDays;
+  let sessions = pkg.sessions;
+  if (promo) {
+    if (promo.type === 'percent') {
+      if (promo.value > 100) throw badRequest('INVALID_PROMO', 'Percent must be 100 or less');
+      d = Math.round((grossOf(pkg) * promo.value) / 100);
+    } else if (promo.type === 'amount') {
+      d = promo.value;
+    } else if (promo.type === 'bonus_sessions') {
+      if (sessions === null) throw badRequest('PROMO_NOT_APPLICABLE', 'Bonus sessions only apply to session packages');
+      sessions += promo.value;
+    } else {
+      if (duration === null) throw badRequest('PROMO_NOT_APPLICABLE', 'Bonus time only applies to time packages');
+      duration += promo.type === 'bonus_months' ? promo.value * 30 : promo.value;
+    }
+  }
+  return { discount: d, durationDays: duration, sessions };
+}
+
 function priceOf(pkg: { price: number; vatPercent: number }, discount: number) {
-  const gross = pkg.price + Math.round((pkg.price * pkg.vatPercent) / 100);
+  const gross = grossOf(pkg);
   if (discount > gross) throw badRequest('INVALID_DISCOUNT', 'Discount exceeds total');
   return gross - discount;
 }
@@ -69,8 +100,16 @@ contractsRouter.post('/', authorize('contracts.create'), async (req, res) => {
   if (!pkg || !branchAllowed(req.access!, pkg.branchId)) throw notFound('Package not found');
   if (pkg.branchId !== member.branchId) throw conflict('BRANCH_MISMATCH', 'Member and package belong to different branches');
   if (!pkg.active) throw conflict('PACKAGE_INACTIVE', 'Package is not active');
-  const total = priceOf(pkg, b.discount);
+  const eff = applyPromo(pkg, b.discount, b.promo);
+  const total = priceOf(pkg, eff.discount);
   const userId = req.auth!.userId;
+  let renewedFromId: string | null = null;
+  if (b.renewed_from_id) {
+    const old = await scoped(req, b.renewed_from_id);
+    if (old.memberId !== member.id) throw conflict('MEMBER_MISMATCH', 'Contract belongs to a different member');
+    if (!['active', 'expired', 'frozen'].includes(old.status)) throw invalid(old, 'renew');
+    renewedFromId = old.id;
+  }
   const created = await prisma.$transaction(async (tx) => {
     const c = await tx.contract.create({
       data: {
@@ -79,16 +118,23 @@ contractsRouter.post('/', authorize('contracts.create'), async (req, res) => {
         packageId: pkg.id,
         branchId: member.branchId,
         totalAmount: total,
-        discount: b.discount,
-        durationDays: pkg.durationDays,
-        sessionsTotal: pkg.sessions,
-        sessionsLeft: pkg.sessions,
+        discount: eff.discount,
+        durationDays: eff.durationDays,
+        sessionsTotal: eff.sessions,
+        sessionsLeft: eff.sessions,
+        renewedFromId,
         note: b.note ?? null,
         createdBy: userId,
       },
       include: { member: true, package: true },
     });
-    await addEvent(tx, c.id, 'created', userId, null, { total_amount: total, discount: b.discount, package_id: pkg.id });
+    await addEvent(tx, c.id, 'created', userId, renewedFromId ? 'renewal' : null, {
+      total_amount: total,
+      discount: eff.discount,
+      package_id: pkg.id,
+      ...(b.promo && { promo: b.promo }),
+      ...(renewedFromId && { renewed_from_id: renewedFromId }),
+    });
     return c;
   });
   await audit(userId, 'contract.created', { contract_id: created.id, code: created.code, total_amount: total }, req.ip, created.id);

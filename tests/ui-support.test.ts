@@ -251,3 +251,117 @@ describe('contract events expose actor name', () => {
     expect(d.body.data.events[0].by_user_name).toBe(who.name);
   });
 });
+
+describe('POST /contracts promo and renewal', () => {
+  const create = (body: Record<string, unknown>) => request(app).post('/api/contracts').set(hA('branch_manager')).send(body);
+
+  it('percent and amount promos reduce the total', async () => {
+    const m = await mkMember(A);
+    const pkg = await mkPkg(A);
+    const p = await create({ member_id: m.id, package_id: pkg.id, promo: { type: 'percent', value: 10 } });
+    expect(p.status).toBe(201);
+    expect(p.body.data.discount).toBe(50000);
+    expect(p.body.data.total_amount).toBe(450000);
+    const a = await create({ member_id: m.id, package_id: pkg.id, promo: { type: 'amount', value: 120000 } });
+    expect(a.body.data.discount).toBe(120000);
+    expect(a.body.data.total_amount).toBe(380000);
+    expect((await create({ member_id: m.id, package_id: pkg.id, promo: { type: 'percent', value: 101 } })).body.error.code).toBe('INVALID_PROMO');
+    expect((await create({ member_id: m.id, package_id: pkg.id, promo: { type: 'amount', value: 999999 } })).body.error.code).toBe('INVALID_DISCOUNT');
+  });
+
+  it('bonus months, days and sessions extend the contract without changing the price', async () => {
+    const m = await mkMember(A);
+    const month = await mkPkg(A, 'month');
+    const sess = await mkPkg(A, 'session');
+    const dur = async (r: { body: { data: { id: string } } }) => (await prisma.contract.findUniqueOrThrow({ where: { id: r.body.data.id } }));
+    const bm = await create({ member_id: m.id, package_id: month.id, promo: { type: 'bonus_months', value: 1 } });
+    expect(bm.body.data.total_amount).toBe(500000);
+    expect((await dur(bm)).durationDays).toBe(60);
+    const bd = await create({ member_id: m.id, package_id: month.id, promo: { type: 'bonus_days', value: 5 } });
+    expect((await dur(bd)).durationDays).toBe(35);
+    const bs = await create({ member_id: m.id, package_id: sess.id, promo: { type: 'bonus_sessions', value: 2 } });
+    const row = await dur(bs);
+    expect(row.sessionsTotal).toBe(12);
+    expect(row.sessionsLeft).toBe(12);
+    expect((await create({ member_id: m.id, package_id: month.id, promo: { type: 'bonus_sessions', value: 2 } })).body.error.code).toBe('PROMO_NOT_APPLICABLE');
+    expect((await create({ member_id: m.id, package_id: sess.id, promo: { type: 'bonus_months', value: 1 } })).body.error.code).toBe('PROMO_NOT_APPLICABLE');
+  });
+
+  it('renewed_from_id links a renewal and validates the old contract', async () => {
+    const m = await mkMember(A);
+    const other = await mkMember(A);
+    const pkg = await mkPkg(A);
+    const old = await mkContract(m.id, A, { status: 'active' });
+    const draft = await mkContract(m.id, A, { status: 'draft' });
+    const ok = await create({ member_id: m.id, package_id: pkg.id, renewed_from_id: old.id });
+    expect(ok.status).toBe(201);
+    expect(ok.body.data.renewed_from_id).toBe(old.id);
+    expect((await create({ member_id: other.id, package_id: pkg.id, renewed_from_id: old.id })).body.error.code).toBe('MEMBER_MISMATCH');
+    expect((await create({ member_id: m.id, package_id: pkg.id, renewed_from_id: draft.id })).body.error.code).toBe('INVALID_STATE');
+  });
+});
+
+describe('member photo and Face ID', () => {
+  const jpeg = (n: number) => Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(n, 7)]);
+  const put = (id: string, body: unknown, role = 'receptionist') => request(app).put(`/api/members/${id}/photo`).set(hA(role)).send(body as object);
+
+  it('stores, serves and lists a photo; validates type, size and permission', async () => {
+    const m = await mkMember(A);
+    const png = await put(m.id, { content_type: 'image/png', image_base64: jpeg(300).toString('base64') });
+    expect(png.status).toBe(400);
+    expect(png.body.error.code).toBe('INVALID_IMAGE');
+    const big = await put(m.id, { content_type: 'image/jpeg', image_base64: jpeg(205000).toString('base64') });
+    expect(big.status).toBe(413);
+    expect(big.body.error.code).toBe('PHOTO_TOO_LARGE');
+    expect((await put(m.id, { content_type: 'image/jpeg', image_base64: jpeg(300).toString('base64') }, 'trainer')).status).toBe(403);
+
+    const no = await request(app).get(`/api/members/${m.id}/photo`).set(hA('receptionist'));
+    expect(no.status).toBe(404);
+
+    const ok = await put(m.id, { content_type: 'image/jpeg', image_base64: jpeg(300).toString('base64') });
+    expect(ok.status).toBe(200);
+    expect(ok.body.data.has_photo).toBe(true);
+    expect(typeof ok.body.data.photo_version).toBe('number');
+
+    const img = await request(app).get(`/api/members/${m.id}/photo`).set(hA('receptionist')).buffer(true).parse((r, cb) => {
+      const chunks: Buffer[] = [];
+      r.on('data', (c: Buffer) => chunks.push(c));
+      r.on('end', () => cb(null, Buffer.concat(chunks)));
+    });
+    expect(img.status).toBe(200);
+    expect(img.headers['content-type']).toContain('image/jpeg');
+    expect(Buffer.isBuffer(img.body) && img.body.length).toBe(304);
+
+    const list = await request(app).get(`/api/members?q=${m.code}`).set(hA('receptionist'));
+    expect(list.body.data[0].has_photo).toBe(true);
+    expect(list.body.data[0].photo_version).toBe(ok.body.data.photo_version);
+
+    const del = await request(app).delete(`/api/members/${m.id}/photo`).set(hA('receptionist'));
+    expect(del.body.data.has_photo).toBe(false);
+    expect((await request(app).get(`/api/members/${m.id}/photo`).set(hA('receptionist'))).status).toBe(404);
+  });
+
+  it('does not expose photos of members in another branch', async () => {
+    const other = await mkMember(B);
+    const r = await put(other.id, { content_type: 'image/jpeg', image_base64: jpeg(300).toString('base64') });
+    expect(r.status).toBe(404);
+  });
+
+  it('face_id is set on create and update, must be unique and well formed', async () => {
+    const m1 = await mkMember(A);
+    const m2 = await mkMember(A);
+    const fid = `F${uniq()}`;
+    const set = await request(app).patch(`/api/members/${m1.id}`).set(hA('receptionist')).send({ face_id: fid });
+    expect(set.status).toBe(200);
+    expect(set.body.data.face_id).toBe(fid);
+    const dup = await request(app).patch(`/api/members/${m2.id}`).set(hA('receptionist')).send({ face_id: fid });
+    expect(dup.status).toBe(409);
+    expect(dup.body.error.code).toBe('DUPLICATE_FACE_ID');
+    expect((await request(app).patch(`/api/members/${m2.id}`).set(hA('receptionist')).send({ face_id: 'bad id!' })).status).toBe(400);
+    const clear = await request(app).patch(`/api/members/${m1.id}`).set(hA('receptionist')).send({ face_id: null });
+    expect(clear.body.data.face_id).toBeNull();
+    const created = await request(app).post('/api/members').set(hA('receptionist')).send({ name: 'Face New', phone: `09${String(10000000 + Math.floor(Math.random() * 8e7))}`, face_id: `N${uniq()}` });
+    expect(created.status).toBe(201);
+    expect(created.body.data.face_id).toMatch(/^N/);
+  });
+});

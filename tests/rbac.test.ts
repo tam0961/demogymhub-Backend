@@ -143,7 +143,7 @@ describe('members behavior', () => {
       .send({ name: 'Full Fields', phone: newPhone(), email: 'F@X.com', gender: 'female', dob: '1999-05-20' });
     expect(r.status).toBe(201);
     expect(Object.keys(r.body.data).sort()).toEqual(
-      ['avatar_url', 'branch_id', 'code', 'created_at', 'dob', 'email', 'gender', 'id', 'name', 'phone', 'status'].sort(),
+      ['avatar_url', 'branch_id', 'code', 'created_at', 'dob', 'email', 'face_id', 'gender', 'has_photo', 'id', 'name', 'phone', 'photo_version', 'status'].sort(),
     );
     expect(r.body.data).toMatchObject({ status: 'active', branch_id: nb, dob: '1999-05-20', email: 'f@x.com' });
     expect(r.body.data.code).toMatch(/^GH\d+$/);
