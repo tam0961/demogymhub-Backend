@@ -313,29 +313,22 @@ classesRouter.patch('/:id', authorize('pt_sessions.create'), async (req, res) =>
   res.json({ data: classToApi(out) });
 });
 
-const registerSchema = z.object({ member_id: z.string().uuid() });
-
-classesRouter.post('/:id/registrations', authorize('pt_sessions.create'), async (req, res) => {
-  const cls = await loadClass(req);
-  const b = registerSchema.parse(req.body);
-  const member = await prisma.member.findUnique({ where: { id: b.member_id } });
-  if (!member || member.branchId !== cls.branchId) throw notFound('Member not found');
-  const elig = await ptEligibility(member.id);
-  if (!elig.member_package.ok) throw conflict('MEMBER_PACKAGE_EXPIRED', 'Member package is no longer valid');
-
-  const reg = await prisma.$transaction(async (tx) => {
-    await lockKey(tx, 'class:' + cls.id);
-    const cur = await tx.groupClass.findUniqueOrThrow({ where: { id: cls.id } });
+export async function registerInTx(
+  tx: Tx,
+  o: { classId: string; member: { id: string; name: string; phone: string; email: string | null }; createdBy: string | null; source: string; lockCheck: (startAt: Date) => void },
+) {
+    await lockKey(tx, 'class:' + o.classId);
+    const cur = await tx.groupClass.findUniqueOrThrow({ where: { id: o.classId } });
     if (cur.status !== 'scheduled') throw conflict('CLASS_CLOSED', 'Class is not open for registration');
     if (cur.startAt <= new Date()) throw conflict('CLASS_STARTED', 'Class has already started');
-    assertOpen(req, cur.startAt);
-    const live = await tx.groupRegistration.findMany({ where: { classId: cls.id, status: { in: [...LIVE] } }, select: { memberId: true } });
+    o.lockCheck(cur.startAt);
+    const live = await tx.groupRegistration.findMany({ where: { classId: o.classId, status: { in: [...LIVE] } }, select: { memberId: true } });
     if (live.length >= cur.capacity) throw conflict('CLASS_FULL', 'Class is full');
-    if (live.some((r) => r.memberId === member.id)) throw conflict('ALREADY_REGISTERED', 'Member is already registered');
+    if (live.some((r) => r.memberId === o.member.id)) throw conflict('ALREADY_REGISTERED', 'Member is already registered');
 
     const today = dateOnly(todayVN());
     const candidates = await tx.contract.findMany({
-      where: { memberId: member.id, branchId: cls.branchId, status: { in: ['active', 'expired'] }, package: { OR: [{ category: 'pt_group' }, { displayGroup: 'pt_group' }] }, sessionsLeft: { gt: 0 } },
+      where: { memberId: o.member.id, branchId: cur.branchId, status: { in: ['active', 'expired'] }, package: { OR: [{ category: 'pt_group' }, { displayGroup: 'pt_group' }] }, sessionsLeft: { gt: 0 } },
       include: { package: { select: { category: true } } },
       orderBy: { endDate: { sort: 'asc', nulls: 'last' } },
     });
@@ -347,20 +340,35 @@ classesRouter.post('/:id/registrations', authorize('pt_sessions.create'), async 
     await tx.contract.update({ where: { id: pick.id }, data: { sessionsLeft: { decrement: 1 } } });
     const created = await tx.groupRegistration.create({
       data: {
-        classId: cls.id,
-        memberId: member.id,
+        classId: o.classId,
+        memberId: o.member.id,
         contractId: pick.id,
-        name: member.name,
-        phone: member.phone,
-        email: member.email,
+        name: o.member.name,
+        phone: o.member.phone,
+        email: o.member.email,
         deducted: true,
-        createdBy: req.auth!.userId,
+        createdBy: o.createdBy,
+        source: o.source,
       },
       include: regInclude,
     });
-    await addEvent(tx, pick.id, 'group_class_reserved', req.auth!.userId, null, { registration_id: created.id, class_id: cls.id });
+    await addEvent(tx, pick.id, 'group_class_reserved', o.createdBy, null, { registration_id: created.id, class_id: o.classId });
     return created;
-  });
+}
+
+const registerSchema = z.object({ member_id: z.string().uuid() });
+
+classesRouter.post('/:id/registrations', authorize('pt_sessions.create'), async (req, res) => {
+  const cls = await loadClass(req);
+  const b = registerSchema.parse(req.body);
+  const member = await prisma.member.findUnique({ where: { id: b.member_id } });
+  if (!member || member.branchId !== cls.branchId) throw notFound('Member not found');
+  const elig = await ptEligibility(member.id);
+  if (!elig.member_package.ok) throw conflict('MEMBER_PACKAGE_EXPIRED', 'Member package is no longer valid');
+
+  const reg = await prisma.$transaction((tx) =>
+    registerInTx(tx, { classId: cls.id, member, createdBy: req.auth!.userId, source: 'manual', lockCheck: (startAt) => assertOpen(req, startAt) }),
+  );
   await audit(req.auth!.userId, 'group_registration.created', { after: regToApi(reg) }, req.ip, reg.id);
   res.status(201).json({ data: regToApi(reg) });
 });

@@ -19,6 +19,7 @@ export default defineConfig({
       VIETQR_BANK_ID: '970436',
       VIETQR_ACCOUNT_NO: '0123456789',
       VIETQR_ACCOUNT_NAME: 'TH GYM',
+      PT_BOT_KEY: 'test-bot-key',
     },
   },
 });

@@ -1,18 +1,17 @@
 import { Router, type Request } from 'express';
-import crypto from 'crypto';
 import { z } from 'zod';
 import type { Member, Prisma, PtSession, User } from '@prisma/client';
 import { audit } from '../../lib/audit';
-import { config } from '../../config';
 import { DATE_RE, dateOnly, dayRange, todayVN } from '../../lib/dates';
-import { badRequest, conflict, forbidden, notFound, unauthorized } from '../../lib/errors';
+import { badRequest, conflict, forbidden, notFound } from '../../lib/errors';
 import { prisma } from '../../lib/prisma';
 import { authenticate, authorize } from '../../middlewares/auth';
 import { addEvent, lockContract, ptEligibility, ptUsable, type Tx } from '../contracts/service';
 import { branchFilter, writeBranch } from '../rbac/scope';
 import { branchAllowed, can } from '../rbac/service';
 import { classesRouter } from './classes';
-import { assertTrainer, lockKey, ownOnly } from './shared';
+import { assertTrainer, lockKey, ownOnly, requireBotKey, syncZaloShifts } from './shared';
+import { fmtDM, lastWord, parseShiftMessage } from './zalo-shift';
 
 export const ptBotRouter = Router();
 export const ptRouter = Router();
@@ -219,48 +218,64 @@ const botSchema = z.object({
 });
 
 ptBotRouter.post('/shifts', async (req, res) => {
-  const given = Buffer.from(req.header('x-bot-key') ?? '');
-  const want = Buffer.from(config.PT_BOT_KEY);
-  if (!config.PT_BOT_KEY || given.length !== want.length || !crypto.timingSafeEqual(given, want)) throw unauthorized('BOT_KEY_INVALID', 'Invalid bot key');
+  requireBotKey(req);
   const b = botSchema.parse(req.body);
   await assertTrainer(b.trainer_id, b.branch_id);
-  const day = dayRange(b.date);
-  const slots = [...new Set(b.hours)].map((h) => {
-    const startAt = new Date(`${b.date}T${h}:00+07:00`);
-    return { key: startAt.getTime(), startAt, endAt: new Date(startAt.getTime() + 3600000) };
+  res.json({ data: await syncZaloShifts(b.branch_id, b.trainer_id, b.date, b.hours) });
+});
+
+const messageSchema = z.object({
+  branch_id: z.string().uuid(),
+  text: z.string().min(1).max(4000),
+  sent_at: z.string().datetime({ offset: true }).optional(),
+});
+
+ptBotRouter.post('/message', async (req, res) => {
+  requireBotKey(req);
+  const b = messageSchema.parse(req.body);
+  const sentAt = b.sent_at ? new Date(b.sent_at) : new Date();
+  const parsed = parseShiftMessage(b.text, sentAt);
+  if (!parsed) {
+    res.json({ data: { handled: false, reply: null } });
+    return;
+  }
+  const today = todayVN(new Date());
+  if (parsed.date < today) {
+    res.json({ data: { handled: true, date: parsed.date, reply: `Bỏ qua ca ngày ${fmtDM(parsed.date)} vì đã qua.`, results: [], errors: [] } });
+    return;
+  }
+  const trainers = await prisma.user.findMany({
+    where: { status: 'active', userRoles: { some: { role: { key: 'trainer' }, OR: [{ branchId: b.branch_id }, { branchId: null }] } } },
+    select: { id: true, name: true },
   });
-  const result = await prisma.$transaction(async (tx) => {
-    await lockKey(tx, 'pt:' + b.trainer_id);
-    const existing = await tx.ptSession.findMany({
-      where: { branchId: b.branch_id, trainerId: b.trainer_id, source: 'zalo', startAt: { gte: day.gte, lt: day.lt } },
-    });
-    const keep = new Set(slots.map((s) => s.key));
-    let added = 0;
-    let removed = 0;
-    let reopened = 0;
-    for (const e of existing) {
-      if (keep.has(e.startAt.getTime())) {
-        if (e.status === 'cancelled') {
-          await tx.ptSession.update({ where: { id: e.id }, data: { status: 'scheduled' } });
-          reopened++;
-        }
-      } else if (e.status === 'scheduled') {
-        if (e.memberId) await tx.ptSession.update({ where: { id: e.id }, data: { status: 'cancelled' } });
-        else await tx.ptSession.delete({ where: { id: e.id } });
-        removed++;
-      }
+  const results: { trainer: string; added: number; removed: number; reopened: number; off: boolean }[] = [];
+  const errors: string[] = [];
+  const reported = new Set<string>();
+  for (const entry of parsed.entries) {
+    const found = trainers.filter((t) => lastWord(t.name) === lastWord(entry.name));
+    if (found.length === 0) {
+      errors.push(`Chưa có PT "${entry.name}" trong GymHub.`);
+      continue;
     }
-    const have = new Set(existing.map((e) => e.startAt.getTime()));
-    for (const s of slots.filter((x) => !have.has(x.key))) {
-      const clash = await tx.ptSession.findFirst({
-        where: { trainerId: b.trainer_id, status: { in: ['scheduled', 'completed'] }, startAt: { lt: s.endAt }, endAt: { gt: s.startAt } },
-        select: { id: true },
-      });
-      if (clash) continue;
-      await tx.ptSession.create({ data: { branchId: b.branch_id, trainerId: b.trainer_id, startAt: s.startAt, endAt: s.endAt, source: 'zalo' } });
-      added++;
+    if (found.length > 1) {
+      errors.push(`Có nhiều PT trùng tên "${entry.name}".`);
+      continue;
     }
-    return { added, removed, reopened };
+    const t = found[0];
+    const r = await syncZaloShifts(b.branch_id, t.id, parsed.date, entry.off ? [] : entry.hours);
+    reported.add(t.id);
+    results.push({ trainer: t.name, off: entry.off, ...r });
+  }
+  const day = dayRange(parsed.date);
+  const withShifts = await prisma.ptSession.findMany({
+    where: { branchId: b.branch_id, startAt: { gte: day.gte, lt: day.lt }, status: { not: 'cancelled' } },
+    select: { trainerId: true },
+    distinct: ['trainerId'],
   });
-  res.json({ data: result });
+  const have = new Set([...reported, ...withShifts.map((s) => s.trainerId)]);
+  const missing = trainers.filter((t) => !have.has(t.id)).map((t) => t.name);
+  const head = `Đã ghi nhận ca ngày ${fmtDM(parsed.date)}`;
+  const tail = missing.length ? `Còn thiếu: ${missing.join(', ')}.` : `Đã đủ cho ${trainers.length} PT.`;
+  const reply = [results.length ? `${head}. ${tail}` : null, ...errors].filter(Boolean).join('\n') || null;
+  res.json({ data: { handled: true, date: parsed.date, reply, results, errors, missing } });
 });
