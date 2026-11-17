@@ -24,6 +24,7 @@ import {
 export const authRouter = Router();
 
 const email = z.string().trim().toLowerCase().email().max(254);
+const loginId = z.string().trim().toLowerCase().min(3).max(100).regex(/^[a-z0-9._@+-]+$/);
 const password = z.string().min(8).max(128);
 
 const ctxOf = (req: Request) => ({ ip: req.ip, userAgent: req.header('user-agent') });
@@ -67,7 +68,7 @@ authRouter.get('/verify', async (req, res) => {
 });
 
 authRouter.post('/login', async (req, res) => {
-  const body = z.object({ email, password: z.string().min(1).max(128) }).parse(req.body);
+  const body = z.object({ email: loginId, password: z.string().min(1).max(128) }).parse(req.body);
   await limit(`login_attempts:ip:${req.ip}`, config.LOGIN_IP_LIMIT, config.LOGIN_WINDOW_SEC);
   await limit(`login_attempts:email:${body.email}`, config.LOGIN_EMAIL_LIMIT, config.LOGIN_WINDOW_SEC);
 

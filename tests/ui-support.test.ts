@@ -785,3 +785,18 @@ describe('contract list payment date', () => {
     expect(r2.body.data.find((x: { id: string }) => x.id === none.id).last_paid_at).toBeNull();
   });
 });
+
+describe('username login', () => {
+  it('owner creates a staff account without an email and it can log in', async () => {
+    const login = `le.${uniq()}`.toLowerCase();
+    const made = await request(app).post('/api/users').set(hA('owner')).send({ name: 'Le Tan', email: login, role: 'receptionist', branch_id: A });
+    expect(made.status).toBe(201);
+    expect(made.body.data.email).toBe(login);
+    const ok = await request(app).post('/api/auth/login').send({ email: login, password: made.body.data.password });
+    expect(ok.status).toBe(200);
+    const bad = await request(app).post('/api/auth/login').send({ email: login, password: 'wrong-password-123' });
+    expect(bad.status).toBe(401);
+    const spaced = await request(app).post('/api/users').set(hA('owner')).send({ name: 'X', email: 'has space', role: 'receptionist', branch_id: A });
+    expect(spaced.status).toBe(400);
+  });
+});

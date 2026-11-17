@@ -93,7 +93,7 @@ adminRouter.get('/users', authenticate, authorize('roles.read'), async (req, res
 
 const createUserSchema = z.object({
   name: z.string().trim().min(1).max(100),
-  email: z.string().trim().toLowerCase().email().max(200),
+  email: z.string().trim().toLowerCase().min(3).max(100).regex(/^[a-z0-9._@+-]+$/),
   password: z.string().min(10).max(100).optional(),
   role: z.string().min(1).max(50),
   branch_id: uuid.nullish(),
