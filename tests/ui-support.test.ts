@@ -1,7 +1,8 @@
 import request from 'supertest';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { prisma } from '../src/lib/prisma';
-import { addDays, dateOnly, todayVN } from '../src/lib/dates';
+import { addDays, addMonths, dateOnly, todayVN } from '../src/lib/dates';
+import { ptUsageDeadline } from '../src/modules/contracts/service';
 import { app, makeUser, tokenFor } from './helpers';
 
 const sfx = Date.now().toString(36);
@@ -19,17 +20,17 @@ const hA = (r: string) => ({ Authorization: `Bearer ${tokens[r]}`, 'X-Branch-Id'
 async function mkMember(branch: string, name = `UI ${uniq()}`) {
   return prisma.member.create({ data: { code: `U${uniq()}`, name, phone: `08${String(10000000 + ++seq * 7 + Math.floor(Math.random() * 1e6))}`, branchId: branch } });
 }
-async function mkPkg(branch: string, type: 'month' | 'session' = 'month') {
+async function mkPkg(branch: string, type: 'month' | 'session' = 'month', category: 'member' | 'pt_1on1' | 'pt_1on2' | 'pt_group' = 'member') {
   return prisma.package.create({
-    data: { name: `UP ${uniq()}`, type, durationDays: type === 'month' ? 30 : null, sessions: type === 'session' ? 10 : null, price: 500000, branchId: branch },
+    data: { name: `UP ${uniq()}`, type, category, durationDays: type === 'month' ? 30 : null, sessions: type === 'session' ? 10 : null, price: 500000, branchId: branch },
   });
 }
 async function mkContract(
   memberId: string,
   branch: string,
-  o: { status: 'draft' | 'signed' | 'active' | 'frozen' | 'expired' | 'cancelled'; end?: Date | null; total?: number; paid?: number; createdAt?: Date; type?: 'month' | 'session'; sessionsLeft?: number },
+  o: { status: 'draft' | 'signed' | 'active' | 'frozen' | 'expired' | 'cancelled'; end?: Date | null; total?: number; paid?: number; createdAt?: Date; type?: 'month' | 'session'; sessionsLeft?: number; sessionsTotal?: number; category?: 'member' | 'pt_1on1' | 'pt_1on2' | 'pt_group'; start?: Date | null },
 ) {
-  const pkg = await mkPkg(branch, o.type);
+  const pkg = await mkPkg(branch, o.type, o.category);
   return prisma.contract.create({
     data: {
       code: `UC${uniq()}`,
@@ -40,8 +41,9 @@ async function mkContract(
       totalAmount: o.total ?? 500000,
       paidAmount: o.paid ?? 0,
       durationDays: 30,
-      startDate: today(),
+      startDate: o.start === undefined ? today() : o.start,
       endDate: o.end === undefined ? addDays(today(), 30) : o.end,
+      sessionsTotal: o.sessionsTotal ?? null,
       sessionsLeft: o.sessionsLeft ?? null,
       ...(o.createdAt && { createdAt: o.createdAt }),
     },
@@ -363,5 +365,291 @@ describe('member photo and Face ID', () => {
     const created = await request(app).post('/api/members').set(hA('receptionist')).send({ name: 'Face New', phone: `09${String(10000000 + Math.floor(Math.random() * 8e7))}`, face_id: `N${uniq()}` });
     expect(created.status).toBe(201);
     expect(created.body.data.face_id).toMatch(/^N/);
+  });
+});
+
+describe('package category and PT rules', () => {
+  const D = (s: string) => dateOnly(s);
+  const iso = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
+  const days = (n: number) => addDays(today(), n);
+  const elig = (id: string, role = 'receptionist') => request(app).get(`/api/members/${id}/pt-eligibility`).set(hA(role));
+
+  it('ptUsageDeadline adds 3 months for 30 sessions or fewer and 6 months above, clamped to month end', () => {
+    expect(iso(ptUsageDeadline(D('2026-11-30'), 30))).toBe('2027-02-28');
+    expect(iso(ptUsageDeadline(D('2026-11-30'), 31))).toBe('2027-05-30');
+    expect(iso(ptUsageDeadline(D('2026-08-31'), 10))).toBe('2026-11-30');
+    expect(ptUsageDeadline(null, 10)).toBeNull();
+    expect(iso(addMonths(D('2027-01-31'), 1))).toBe('2027-02-28');
+  });
+
+  it('packages API accepts, returns and filters by category', async () => {
+    const mk = (name: string, category: string) =>
+      request(app).post('/api/packages').set(hA('branch_manager')).send({ name, type: 'session', sessions: 10, price: 100, category });
+    const pt = await mk(`PT only ${uniq()}`, 'pt_group');
+    expect(pt.status).toBe(201);
+    expect(pt.body.data.category).toBe('pt_group');
+    const dflt = await request(app).post('/api/packages').set(hA('branch_manager')).send({ name: `Gym ${uniq()}`, type: 'month', duration_days: 30, price: 100 });
+    expect(dflt.body.data.category).toBe('member');
+    const only = await request(app).get('/api/packages?category=pt_group&limit=100').set(hA('branch_manager'));
+    expect(only.body.data.every((p: { category: string }) => p.category === 'pt_group')).toBe(true);
+    const upd = await request(app).patch(`/api/packages/${dflt.body.data.id}`).set(hA('branch_manager')).send({ category: 'pt_1on2' });
+    expect(upd.body.data.category).toBe('pt_1on2');
+  });
+
+  it('contract API exposes package.category and usage_deadline for PT only', async () => {
+    const m = await mkMember(A);
+    const end = days(10);
+    const pt = await mkContract(m.id, A, { status: 'active', type: 'session', category: 'pt_1on1', sessionsTotal: 20, sessionsLeft: 20, end });
+    const gym = await mkContract(m.id, A, { status: 'active' });
+    const a = await request(app).get(`/api/contracts/${pt.id}`).set(hA('receptionist'));
+    expect(a.body.data.package.category).toBe('pt_1on1');
+    expect(a.body.data.usage_deadline).toBe(iso(addMonths(end, 3)));
+    const big = await mkContract(m.id, A, { status: 'active', type: 'session', category: 'pt_1on1', sessionsTotal: 40, sessionsLeft: 40, end });
+    expect((await request(app).get(`/api/contracts/${big.id}`).set(hA('receptionist'))).body.data.usage_deadline).toBe(iso(addMonths(end, 6)));
+    const g = await request(app).get(`/api/contracts/${gym.id}`).set(hA('receptionist'));
+    expect(g.body.data).not.toHaveProperty('usage_deadline');
+  });
+
+  it('member list separates the member package from the PT package', async () => {
+    const m = await mkMember(A);
+    const gym = await mkContract(m.id, A, { status: 'active', end: days(20) });
+    await mkContract(m.id, A, { status: 'active', type: 'session', category: 'pt_1on1', sessionsTotal: 10, sessionsLeft: 7, end: days(-10) });
+    const list = await request(app).get(`/api/members?q=${m.code}`).set(hA('receptionist'));
+    const row = list.body.data[0];
+    expect(row.current_contract.code).toBe(gym.code);
+    expect(row.pt_contract).toMatchObject({ sessions_total: 10, sessions_left: 7, usage_valid: true });
+    expect(row.pt_contract.usage_deadline).toBe(iso(addMonths(days(-10), 3)));
+    const onlyPt = await mkMember(A);
+    await mkContract(onlyPt.id, A, { status: 'active', type: 'session', category: 'pt_1on1', sessionsTotal: 10, sessionsLeft: 10 });
+    const r2 = (await request(app).get(`/api/members?q=${onlyPt.code}`).set(hA('receptionist'))).body.data[0];
+    expect(r2.current_contract).toBeNull();
+    expect(r2.pt_contract).not.toBeNull();
+  });
+
+  it('PT eligibility needs a valid member package AND a PT package inside its usage window', async () => {
+    const mk = async (memberEnd: number | 'none', pt: { end: number; total: number } | 'none') => {
+      const m = await mkMember(A);
+      if (memberEnd !== 'none') {
+        await mkContract(m.id, A, { status: memberEnd < 0 ? 'expired' : 'active', end: days(memberEnd) });
+      }
+      if (pt !== 'none') {
+        await mkContract(m.id, A, { status: pt.end < 0 ? 'expired' : 'active', type: 'session', category: 'pt_1on1', sessionsTotal: pt.total, sessionsLeft: 5, end: days(pt.end) });
+      }
+      return m.id;
+    };
+    const ok = (await elig(await mk(30, { end: 30, total: 20 }))).body.data;
+    expect(ok.eligible).toBe(true);
+    expect(ok.member_package.ok && ok.pt_package.ok).toBe(true);
+
+    const inWindow = (await elig(await mk(30, { end: -30, total: 20 }))).body.data;
+    expect(inWindow.eligible).toBe(true);
+    expect(inWindow.pt_package.usage_deadline).toBe(iso(addMonths(days(-30), 3)));
+
+    const pastWindow = (await elig(await mk(30, { end: -100, total: 20 }))).body.data;
+    expect(pastWindow.eligible).toBe(false);
+    expect(pastWindow.reasons).toEqual(['PT_USAGE_EXPIRED']);
+
+    const bigStillOk = (await elig(await mk(30, { end: -100, total: 40 }))).body.data;
+    expect(bigStillOk.eligible).toBe(true);
+
+    const memberExpired = (await elig(await mk(-5, { end: 30, total: 20 }))).body.data;
+    expect(memberExpired.eligible).toBe(false);
+    expect(memberExpired.reasons).toEqual(['MEMBER_PACKAGE_EXPIRED']);
+
+    const noPt = (await elig(await mk(30, 'none'))).body.data;
+    expect(noPt.reasons).toEqual(['NO_PT_PACKAGE']);
+    const none = (await elig(await mk('none', 'none'))).body.data;
+    expect(none.reasons).toEqual(['MEMBER_PACKAGE_EXPIRED', 'NO_PT_PACKAGE']);
+  });
+
+  it('PT eligibility is branch scoped and needs members.read', async () => {
+    const other = await mkMember(B);
+    expect((await elig(other.id)).status).toBe(404);
+    const mine = await mkMember(A);
+    expect((await elig(mine.id, 'trainer')).status).toBe(403);
+  });
+
+  it('check-in is granted by the member package only; a PT package never grants entry or loses sessions', async () => {
+    const onlyPt = await mkMember(A);
+    await mkContract(onlyPt.id, A, { status: 'active', type: 'session', category: 'pt_1on1', sessionsTotal: 10, sessionsLeft: 10 });
+    const denied = await request(app).post('/api/checkins').set(hA('receptionist')).send({ member_id: onlyPt.id });
+    expect(denied.status).toBe(200);
+    expect(denied.body.data.result).toBe('denied');
+    expect(denied.body.data.reason).toBe('NO_ACTIVE_CONTRACT');
+
+    const both = await mkMember(A);
+    const gym = await mkContract(both.id, A, { status: 'active' });
+    const pt = await mkContract(both.id, A, { status: 'active', type: 'session', category: 'pt_1on1', sessionsTotal: 10, sessionsLeft: 10 });
+    const ok = await request(app).post('/api/checkins').set(hA('receptionist')).send({ member_id: both.id });
+    expect(ok.body.data.result).toBe('allowed');
+    expect(ok.body.data.contract.code).toBe(gym.code);
+    expect((await prisma.contract.findUniqueOrThrow({ where: { id: pt.id } })).sessionsLeft).toBe(10);
+  });
+});
+
+describe('package bundles, versions and deactivation', () => {
+  const asMgr = (m: 'post' | 'patch' | 'get', url: string, body?: object) => {
+    const r = request(app)[m](url).set(hA('branch_manager'));
+    return body ? r.send(body) : r;
+  };
+  const memberPkg = (name = `Member ${uniq()}`, extra: object = {}) =>
+    asMgr('post', '/api/packages', { name, type: 'month', category: 'member', duration_days: 30, price: 700000, branch_id: A, ...extra });
+  const ptPkg = (bundled: string | null, extra: object = {}) =>
+    asMgr('post', '/api/packages', { name: `PT ${uniq()}`, type: 'session', category: 'pt_1on1', sessions: 10, price: 3000000, branch_id: A, bundled_member_package_id: bundled, ...extra });
+  const iso = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
+
+  it('a PT package can include an active member package of the same branch, nothing else', async () => {
+    const m = (await memberPkg()).body.data;
+    const ok = await ptPkg(m.id);
+    expect(ok.status).toBe(201);
+    expect(ok.body.data.bundled_member_package).toMatchObject({ id: m.id, name: m.name, duration_days: 30 });
+    const onMember = await memberPkg(`M2 ${uniq()}`, { bundled_member_package_id: m.id });
+    expect(onMember.body.error.code).toBe('INVALID_BUNDLE');
+    const ptAsBundle = await ptPkg(ok.body.data.id);
+    expect(ptAsBundle.body.error.code).toBe('INVALID_BUNDLE');
+    const off = (await memberPkg()).body.data;
+    await asMgr('patch', `/api/packages/${off.id}`, { active: false });
+    expect((await ptPkg(off.id)).body.error.code).toBe('INVALID_BUNDLE');
+  });
+
+  it('a package that already has contracts cannot be edited, only activated or deactivated', async () => {
+    const pkg = (await memberPkg()).body.data;
+    expect(pkg.contracts_count).toBe(0);
+    const edit = await asMgr('patch', `/api/packages/${pkg.id}`, { price: 1 });
+    expect(edit.status).toBe(200);
+    const mem = await mkMember(A);
+    expect((await asMgr('post', '/api/contracts', { member_id: mem.id, package_id: pkg.id })).status).toBe(201);
+    const used = await asMgr('get', `/api/packages/${pkg.id}`);
+    expect(used.body.data).toMatchObject({ contracts_count: 1, in_use: true });
+    const blocked = await asMgr('patch', `/api/packages/${pkg.id}`, { price: 2 });
+    expect(blocked.status).toBe(409);
+    expect(blocked.body.error.code).toBe('PACKAGE_IN_USE');
+    expect((await asMgr('patch', `/api/packages/${pkg.id}`, { name: 'Renamed' })).body.error.code).toBe('PACKAGE_IN_USE');
+    const off = await asMgr('patch', `/api/packages/${pkg.id}`, { active: false });
+    expect(off.status).toBe(200);
+    expect(off.body.data.active).toBe(false);
+    expect((await asMgr('post', '/api/contracts', { member_id: mem.id, package_id: pkg.id })).body.error.code).toBe('PACKAGE_INACTIVE');
+    const on = await asMgr('patch', `/api/packages/${pkg.id}`, { active: true });
+    expect(on.body.data.active).toBe(true);
+  });
+
+  it('a new version replaces the old package without changing it, and can deactivate the old one', async () => {
+    const old = (await memberPkg(`Old ${uniq()}`)).body.data;
+    const mem = await mkMember(A);
+    await asMgr('post', '/api/contracts', { member_id: mem.id, package_id: old.id });
+    const v2 = await memberPkg(`New ${uniq()}`, { price: 800000, replaces_id: old.id, deactivate_replaced: true });
+    expect(v2.status).toBe(201);
+    expect(v2.body.data.replaces_id).toBe(old.id);
+    const oldNow = (await asMgr('get', `/api/packages/${old.id}`)).body.data;
+    expect(oldNow).toMatchObject({ price: 700000, name: old.name, active: false });
+    const v3 = await memberPkg(`Newer ${uniq()}`, { replaces_id: v2.body.data.id });
+    expect((await asMgr('get', `/api/packages/${v2.body.data.id}`)).body.data.active).toBe(true);
+    expect(v3.body.data.replaces_id).toBe(v2.body.data.id);
+  });
+
+  it('selling a PT package also creates the included member contract, signed, activated and cancelled with it', async () => {
+    const m = (await memberPkg()).body.data;
+    const p = (await ptPkg(m.id)).body.data;
+    const mem = await mkMember(A);
+    const created = await asMgr('post', '/api/contracts', { member_id: mem.id, package_id: p.id });
+    expect(created.status).toBe(201);
+    const pt = created.body.data;
+    expect(pt.total_amount).toBe(3000000);
+    expect(pt.bundled_contracts).toHaveLength(1);
+    const childId = pt.bundled_contracts[0].id;
+    expect(pt.bundled_contracts[0].package.category).toBe('member');
+
+    const child0 = (await asMgr('get', `/api/contracts/${childId}`)).body.data;
+    expect(child0).toMatchObject({ total_amount: 0, status: 'draft', bundle_of_id: pt.id, member_id: mem.id });
+
+    await asMgr('post', `/api/contracts/${pt.id}/sign`, { signature: 'data:image/png;base64,AAAA' });
+    expect((await asMgr('get', `/api/contracts/${childId}`)).body.data.status).toBe('signed');
+
+    await prisma.contract.update({ where: { id: pt.id }, data: { paidAmount: 3000000 } });
+    const act = await asMgr('post', `/api/contracts/${pt.id}/activate`, {});
+    expect(act.status).toBe(200);
+    const child1 = (await asMgr('get', `/api/contracts/${childId}`)).body.data;
+    expect(child1.status).toBe('active');
+    expect(child1.start_date).toBe(act.body.data.start_date);
+    expect(child1.end_date).toBe(iso(addDays(dateOnly(child1.start_date), 30)));
+    expect((await prisma.member.findUniqueOrThrow({ where: { id: mem.id } })).status).toBe('active');
+
+    const ci = await request(app).post('/api/checkins').set(hA('receptionist')).send({ member_id: mem.id });
+    expect(ci.body.data.result).toBe('allowed');
+    expect(ci.body.data.contract.id).toBe(childId);
+
+    const cancel = await asMgr('post', `/api/contracts/${pt.id}/cancel`, { reason: 'khach doi y' });
+    expect(cancel.status).toBe(200);
+    expect((await asMgr('get', `/api/contracts/${childId}`)).body.data.status).toBe('cancelled');
+  });
+
+  it('the included member package extends a member package that is still running', async () => {
+    const m = (await memberPkg()).body.data;
+    const p = (await ptPkg(m.id)).body.data;
+    const mem = await mkMember(A);
+    const running = await mkContract(mem.id, A, { status: 'active', end: addDays(today(), 10) });
+    const pt = (await asMgr('post', '/api/contracts', { member_id: mem.id, package_id: p.id })).body.data;
+    await asMgr('post', `/api/contracts/${pt.id}/sign`, { signature: 'data:image/png;base64,AAAA' });
+    await prisma.contract.update({ where: { id: pt.id }, data: { paidAmount: 3000000 } });
+    await asMgr('post', `/api/contracts/${pt.id}/activate`, {});
+    const child = (await asMgr('get', `/api/contracts/${pt.bundled_contracts[0].id}`)).body.data;
+    expect(child.start_date).toBe(iso(addDays(addDays(today(), 10), 1)));
+    expect((await prisma.contract.findUniqueOrThrow({ where: { id: child.id } })).renewedFromId).toBe(running.id);
+  });
+
+  it('a PT package without an included package creates one contract; an inactive included package blocks the sale', async () => {
+    const p = (await ptPkg(null)).body.data;
+    const mem = await mkMember(A);
+    const one = await asMgr('post', '/api/contracts', { member_id: mem.id, package_id: p.id });
+    expect(one.body.data.bundled_contracts).toBeUndefined();
+    const m = (await memberPkg()).body.data;
+    const withBundle = (await ptPkg(m.id)).body.data;
+    await prisma.package.update({ where: { id: m.id }, data: { active: false } });
+    const blocked = await asMgr('post', '/api/contracts', { member_id: mem.id, package_id: withBundle.id });
+    expect(blocked.status).toBe(409);
+    expect(blocked.body.error.code).toBe('BUNDLED_PACKAGE_INACTIVE');
+  });
+});
+
+describe('package PATCH keeps omitted fields', () => {
+  it('editing one field does not reset VAT, category or active', async () => {
+    const created = await request(app)
+      .post('/api/packages')
+      .set(hA('branch_manager'))
+      .send({ name: `Keep ${uniq()}`, type: 'session', category: 'pt_1on2', sessions: 10, price: 100, vat_percent: 8, active: false, branch_id: A });
+    expect(created.status).toBe(201);
+    const r = await request(app).patch(`/api/packages/${created.body.data.id}`).set(hA('branch_manager')).send({ price: 500 });
+    expect(r.status).toBe(200);
+    expect(r.body.data).toMatchObject({ price: 500, vat_percent: 8, category: 'pt_1on2', active: false });
+  });
+});
+
+describe('contract keeps the package name from the time of sale', () => {
+  it('snapshots the name at creation and signing; renaming the package in the database changes nothing', async () => {
+    const pkg = await mkPkg(A);
+    const original = pkg.name;
+    const mem = await mkMember(A);
+    const created = await request(app).post('/api/contracts').set(hA('branch_manager')).send({ member_id: mem.id, package_id: pkg.id });
+    expect(created.body.data.package.name).toBe(original);
+    expect((await prisma.contract.findUniqueOrThrow({ where: { id: created.body.data.id } })).packageName).toBe(original);
+
+    await request(app).post(`/api/contracts/${created.body.data.id}/sign`).set(hA('branch_manager')).send({ signature: 'data:image/png;base64,AAAA' });
+    await prisma.contract.update({ where: { id: created.body.data.id }, data: { status: 'active', startDate: today(), endDate: addDays(today(), 30) } });
+
+    await prisma.package.update({ where: { id: pkg.id }, data: { name: 'Renamed later' } });
+    const detail = await request(app).get(`/api/contracts/${created.body.data.id}`).set(hA('branch_manager'));
+    expect(detail.body.data.package.name).toBe(original);
+    const members = await request(app).get(`/api/members?q=${mem.code}`).set(hA('receptionist'));
+    expect(members.body.data[0].current_contract.package_name).toBe(original);
+    const list = await request(app).get(`/api/contracts?member_id=${mem.id}`).set(hA('branch_manager'));
+    expect(list.body.data[0].package.name).toBe(original);
+  });
+
+  it('a contract without a snapshot falls back to the live package name', async () => {
+    const mem = await mkMember(A);
+    const c = await mkContract(mem.id, A, { status: 'active' });
+    const pk = await prisma.package.findUniqueOrThrow({ where: { id: c.packageId } });
+    const detail = await request(app).get(`/api/contracts/${c.id}`).set(hA('branch_manager'));
+    expect(detail.body.data.package.name).toBe(pk.name);
   });
 });

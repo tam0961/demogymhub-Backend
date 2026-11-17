@@ -12,3 +12,10 @@ export function dayRange(day: string) {
 }
 
 export const vnDayOf = (d: Date) => new Date(d.getTime() + VN_MS).toISOString().slice(0, 10);
+
+export function addMonths(d: Date, n: number) {
+  const y = d.getUTCFullYear();
+  const m = d.getUTCMonth() + n;
+  const last = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+  return new Date(Date.UTC(y, m, Math.min(d.getUTCDate(), last)));
+}

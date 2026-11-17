@@ -66,7 +66,12 @@ async function evaluate(req: Request, m: Member, branchId: string): Promise<Outc
   if (inside) return { result: 'allowed', reason: null, contract: inside.contract, checkinId: inside.id };
 
   const contracts = await prisma.contract.findMany({
-    where: { memberId: m.id, branchId: m.branchId, status: { in: ['active', 'frozen', 'expired'] } },
+    where: {
+      memberId: m.id,
+      branchId: m.branchId,
+      status: { in: ['active', 'frozen', 'expired'] },
+      package: { category: 'member' },
+    },
     orderBy: [{ endDate: { sort: 'desc', nulls: 'first' } }, { createdAt: 'desc' }],
   });
   const deductedToday = new Set(

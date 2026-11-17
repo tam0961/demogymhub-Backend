@@ -44,7 +44,7 @@ reportsRouter.get('/dashboard', authorize('reports.view'), async (req, res) => {
   const [newContracts, activeMembers, expiring, allowed, denied, inside, debtRows] = await Promise.all([
     prisma.contract.count({ where: { ...bf, createdAt: range, status: { not: 'cancelled' } } }),
     prisma.member.count({ where: { ...bf, status: 'active' } }),
-    prisma.contract.count({ where: { ...bf, status: 'active', endDate: { gte: dayStart, lte: addDays(dayStart, 7) } } }),
+    prisma.contract.count({ where: { ...bf, status: 'active', package: { category: 'member' }, endDate: { gte: dayStart, lte: addDays(dayStart, 7) } } }),
     prisma.checkin.count({ where: { ...bf, result: 'allowed', checkedInAt: range } }),
     prisma.checkin.count({ where: { ...bf, result: 'denied', checkedInAt: range } }),
     prisma.checkin.count({ where: { ...bf, result: 'allowed', checkedOutAt: null, checkedInAt: range } }),
@@ -97,7 +97,7 @@ reportsRouter.get('/today-tasks', authorize('contracts.read'), async (req, res) 
   const today = dateOnly(todayVN());
   const LIMIT = 5;
   const who = { member: { select: { name: true } } } as const;
-  const expWhere = { ...bf, status: 'active' as const, endDate: { gte: today, lte: addDays(today, 2) } };
+  const expWhere = { ...bf, status: 'active' as const, package: { category: 'member' as const }, endDate: { gte: today, lte: addDays(today, 2) } };
   const refundWhere = { ...bf, status: 'confirmed' as const, refundRequestedAt: { not: null }, refundedAt: null };
 
   const [draftCount, drafts, unpaidRows, expCount, expiring, refundCount, refunds] = await Promise.all([

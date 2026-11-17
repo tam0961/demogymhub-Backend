@@ -19,6 +19,13 @@ enum PackageType {
   session
 }
 
+enum PackageCategory {
+  member
+  pt_1on1
+  pt_1on2
+  pt_group
+}
+
 enum ContractStatus {
   draft
   signed
@@ -220,6 +227,9 @@ model Package {
   id           String      @id @default(uuid()) @db.Uuid
   name         String
   type         PackageType
+  category     PackageCategory @default(member)
+  bundledMemberPackageId String? @map("bundled_member_package_id") @db.Uuid
+  replacesId   String?     @map("replaces_id") @db.Uuid
   durationDays Int?        @map("duration_days")
   sessions     Int?
   price        Int
@@ -229,10 +239,15 @@ model Package {
   createdAt    DateTime    @default(now()) @map("created_at") @db.Timestamptz
   updatedAt    DateTime    @updatedAt @map("updated_at") @db.Timestamptz
 
-  branch    Branch     @relation(fields: [branchId], references: [id])
-  contracts Contract[]
+  branch        Branch     @relation(fields: [branchId], references: [id])
+  contracts     Contract[]
+  bundledMember Package?   @relation("BundledMember", fields: [bundledMemberPackageId], references: [id], onDelete: SetNull)
+  bundledBy     Package[]  @relation("BundledMember")
+  replaces      Package?   @relation("Replaces", fields: [replacesId], references: [id], onDelete: SetNull)
+  replacedBy    Package[]  @relation("Replaces")
 
   @@index([branchId])
+  @@index([category])
   @@map("packages")
 }
 
@@ -256,6 +271,8 @@ model Contract {
   activatedAt   DateTime?      @map("activated_at") @db.Timestamptz
   frozenUntil   DateTime?      @map("frozen_until") @db.Date
   renewedFromId String?        @map("renewed_from_id") @db.Uuid
+  bundleOfId    String?        @map("bundle_of_id") @db.Uuid
+  packageName   String?        @map("package_name")
   note          String?
   createdBy     String?        @map("created_by") @db.Uuid
   createdAt     DateTime       @default(now()) @map("created_at") @db.Timestamptz
@@ -267,10 +284,13 @@ model Contract {
   events   ContractEvent[]
   payments Payment[]
   checkins Checkin[]
+  bundleOf Contract?       @relation("Bundle", fields: [bundleOfId], references: [id], onDelete: SetNull)
+  bundled  Contract[]      @relation("Bundle")
 
   @@index([memberId])
   @@index([branchId, status])
   @@index([endDate])
+  @@index([bundleOfId])
   @@map("contracts")
 }
 

@@ -9,7 +9,7 @@ import { authenticate, authorize } from '../../middlewares/auth';
 import { branchFilter } from '../rbac/scope';
 import { branchAllowed, can } from '../rbac/service';
 import { contractPdf } from './pdf';
-import { addEvent, contractToApi, lastPaymentMethods, lockContract, syncMemberStatus, type Tx } from './service';
+import { addEvent, contractToApi, isPtCategory, lastPaymentMethods, lockContract, syncMemberStatus, type Tx } from './service';
 
 export const contractsRouter = Router();
 contractsRouter.use(authenticate);
@@ -100,6 +100,8 @@ contractsRouter.post('/', authorize('contracts.create'), async (req, res) => {
   if (!pkg || !branchAllowed(req.access!, pkg.branchId)) throw notFound('Package not found');
   if (pkg.branchId !== member.branchId) throw conflict('BRANCH_MISMATCH', 'Member and package belong to different branches');
   if (!pkg.active) throw conflict('PACKAGE_INACTIVE', 'Package is not active');
+  const bundledPkg = isPtCategory(pkg.category) && pkg.bundledMemberPackageId ? await prisma.package.findUnique({ where: { id: pkg.bundledMemberPackageId } }) : null;
+  if (bundledPkg && !bundledPkg.active) throw conflict('BUNDLED_PACKAGE_INACTIVE', 'The member package included with this PT package is no longer active');
   const eff = applyPromo(pkg, b.discount, b.promo);
   const total = priceOf(pkg, eff.discount);
   const userId = req.auth!.userId;
@@ -116,6 +118,7 @@ contractsRouter.post('/', authorize('contracts.create'), async (req, res) => {
         code: await nextCode(tx),
         memberId: member.id,
         packageId: pkg.id,
+        packageName: pkg.name,
         branchId: member.branchId,
         totalAmount: total,
         discount: eff.discount,
@@ -135,10 +138,32 @@ contractsRouter.post('/', authorize('contracts.create'), async (req, res) => {
       ...(b.promo && { promo: b.promo }),
       ...(renewedFromId && { renewed_from_id: renewedFromId }),
     });
-    return c;
+    let child: (typeof c & { package: NonNullable<typeof c.package> }) | null = null;
+    if (bundledPkg) {
+      child = await tx.contract.create({
+        data: {
+          code: await nextCode(tx),
+          memberId: member.id,
+          packageId: bundledPkg.id,
+          packageName: bundledPkg.name,
+          branchId: member.branchId,
+          totalAmount: 0,
+          discount: grossOf(bundledPkg),
+          durationDays: bundledPkg.durationDays,
+          sessionsTotal: bundledPkg.sessions,
+          sessionsLeft: bundledPkg.sessions,
+          bundleOfId: c.id,
+          note: `Kèm gói PT ${c.code}`,
+          createdBy: userId,
+        },
+        include: { member: true, package: true },
+      });
+      await addEvent(tx, child.id, 'created', userId, 'bundle', { bundle_of: c.id, package_id: bundledPkg.id });
+    }
+    return { c, child };
   });
-  await audit(userId, 'contract.created', { contract_id: created.id, code: created.code, total_amount: total }, req.ip, created.id);
-  res.status(201).json({ data: contractToApi(created) });
+  await audit(userId, 'contract.created', { contract_id: created.c.id, code: created.c.code, total_amount: total, bundled: created.child?.code ?? null }, req.ip, created.c.id);
+  res.status(201).json({ data: contractToApi(created.c, created.child ? { bundled: [created.child] } : {}) });
 });
 
 contractsRouter.get('/', authorize('contracts.read'), async (req, res) => {
@@ -177,13 +202,20 @@ contractsRouter.get('/:id', authorize('contracts.read'), async (req, res) => {
   const id = uuid.parse(req.params.id);
   const c = await prisma.contract.findUnique({
     where: { id },
-    include: { member: true, package: true, branch: true, events: { orderBy: { createdAt: 'asc' } }, payments: { orderBy: { createdAt: 'asc' } } },
+    include: {
+      member: true,
+      package: true,
+      branch: true,
+      events: { orderBy: { createdAt: 'asc' } },
+      payments: { orderBy: { createdAt: 'asc' } },
+      bundled: { include: { package: true }, orderBy: { createdAt: 'asc' } },
+    },
   });
   if (!c || !branchAllowed(req.access!, c.branchId)) throw notFound('Contract not found');
   const lpm = await lastPaymentMethods([c.id]);
   const actorIds = [...new Set(c.events.map((e) => e.byUser).filter((x): x is string => !!x))];
   const actors = actorIds.length ? await prisma.user.findMany({ where: { id: { in: actorIds } }, select: { id: true, name: true } }) : [];
-  res.json({ data: contractToApi(c, { branch: c.branch, last_payment_method: lpm.get(c.id) ?? null, user_names: new Map(actors.map((u) => [u.id, u.name])) }) });
+  res.json({ data: contractToApi(c, { branch: c.branch, last_payment_method: lpm.get(c.id) ?? null, user_names: new Map(actors.map((u) => [u.id, u.name])), bundled: c.bundled }) });
 });
 
 contractsRouter.get('/:id/pdf', authorize('contracts.read'), async (req, res) => {
@@ -205,12 +237,19 @@ contractsRouter.post('/:id/sign', authorize('contracts.sign'), async (req, res) 
     await lockContract(tx, id);
     const fresh = await tx.contract.findUniqueOrThrow({ where: { id } });
     if (fresh.status !== 'draft') throw invalid(fresh, 'sign');
+    const sold = await tx.package.findUniqueOrThrow({ where: { id: fresh.packageId }, select: { name: true } });
     const u = await tx.contract.update({
       where: { id },
-      data: { status: 'signed', signedAt: new Date(), signatureData: b.signature },
+      data: { status: 'signed', signedAt: new Date(), signatureData: b.signature, packageName: fresh.packageName ?? sold.name },
       include: { member: true, package: true },
     });
     await addEvent(tx, id, 'signed', userId, null, { status: { from: 'draft', to: 'signed' } });
+    const kids = await tx.contract.findMany({ where: { bundleOfId: id, status: 'draft' } });
+    for (const k of kids) {
+      await lockContract(tx, k.id);
+      await tx.contract.update({ where: { id: k.id }, data: { status: 'signed', signedAt: new Date(), signatureData: b.signature } });
+      await addEvent(tx, k.id, 'signed', userId, 'bundle', { status: { from: 'draft', to: 'signed' } });
+    }
     return u;
   });
   await audit(userId, 'contract.signed', { contract_id: cur.id, code: cur.code }, req.ip, cur.id);
@@ -248,6 +287,27 @@ contractsRouter.post('/:id/activate', authorize('contracts.activate'), async (re
       total_amount: f.totalAmount,
       allow_debt: b.allow_debt,
     });
+    const kids = await tx.contract.findMany({ where: { bundleOfId: id, status: 'signed' } });
+    for (const k of kids) {
+      await lockContract(tx, k.id);
+      const prev = await tx.contract.findFirst({
+        where: { memberId: f.memberId, id: { not: k.id }, status: 'active', package: { category: 'member' }, endDate: { gte: start } },
+        orderBy: { endDate: 'desc' },
+      });
+      const kStart = prev?.endDate ? addDays(prev.endDate, 1) : start;
+      const kEnd = k.durationDays ? addDays(kStart, k.durationDays) : null;
+      await tx.contract.update({
+        where: { id: k.id },
+        data: { status: 'active', startDate: kStart, endDate: kEnd, activatedAt: new Date(), renewedFromId: k.renewedFromId ?? prev?.id ?? null },
+      });
+      await addEvent(tx, k.id, 'activated', userId, 'bundle', {
+        status: { from: 'signed', to: 'active' },
+        start_date: kStart.toISOString().slice(0, 10),
+        end_date: kEnd ? kEnd.toISOString().slice(0, 10) : null,
+        bundle_of: id,
+        extends_contract_id: prev?.id ?? null,
+      });
+    }
     await syncMemberStatus(tx, f.memberId);
     return u;
   });
@@ -273,6 +333,7 @@ contractsRouter.post('/:id/renew', authorize('contracts.create'), async (req, re
         code: await nextCode(tx),
         memberId: old.memberId,
         packageId: pkg.id,
+        packageName: pkg.name,
         branchId: old.branchId,
         totalAmount: priceOf(pkg, 0),
         discount: 0,
@@ -360,6 +421,12 @@ contractsRouter.post('/:id/cancel', authorize('contracts.cancel'), async (req, r
     if (['cancelled', 'expired'].includes(f.status)) throw invalid(f, 'cancel');
     const u = await tx.contract.update({ where: { id }, data: { status: 'cancelled' }, include: { member: true, package: true } });
     await addEvent(tx, id, 'cancelled', userId, b.reason, { status: { from: f.status, to: 'cancelled' } });
+    const kids = await tx.contract.findMany({ where: { bundleOfId: id, status: { notIn: ['cancelled', 'expired'] } } });
+    for (const k of kids) {
+      await lockContract(tx, k.id);
+      await tx.contract.update({ where: { id: k.id }, data: { status: 'cancelled' } });
+      await addEvent(tx, k.id, 'cancelled', userId, b.reason, { status: { from: k.status, to: 'cancelled' }, bundle_of: id });
+    }
     await syncMemberStatus(tx, f.memberId);
     return u;
   });

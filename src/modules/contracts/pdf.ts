@@ -29,7 +29,7 @@ export async function contractPdf(c: Contract & { member: Member; package: Packa
   line('Status', c.status);
   line('Member', `${c.member.name} (${c.member.code})`);
   line('Phone', c.member.phone);
-  line('Package', `${c.package.name} [${c.package.type}]`);
+  line('Package', `${c.packageName ?? c.package.name} [${c.package.type}]`);
   line('Start date', fmtDate(c.startDate) ?? '-');
   line('End date', fmtDate(c.endDate) ?? '-');
   if (c.sessionsTotal != null) line('Sessions', `${c.sessionsLeft ?? 0} left of ${c.sessionsTotal}`);

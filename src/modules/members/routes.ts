@@ -5,7 +5,7 @@ import { audit } from '../../lib/audit';
 import { HttpError, badRequest, conflict, notFound } from '../../lib/errors';
 import { prisma } from '../../lib/prisma';
 import { authenticate, authorize } from '../../middlewares/auth';
-import { currentContracts, type CurrentContract } from '../contracts/service';
+import { memberContractSummaries, ptEligibility, type CurrentContract, type PtContract } from '../contracts/service';
 import { branchFilter, writeBranch } from '../rbac/scope';
 import { branchAllowed } from '../rbac/service';
 
@@ -73,10 +73,17 @@ async function photoTimes(ids: string[]) {
   return new Map(rows.map((r) => [r.memberId, r.updatedAt]));
 }
 
-const withExtras = (m: Member, b: { id: string; code: string; name: string }, current_contract: CurrentContract | null, photoAt?: Date | null) => ({
+const withExtras = (
+  m: Member,
+  b: { id: string; code: string; name: string },
+  current_contract: CurrentContract | null,
+  pt_contract: PtContract | null,
+  photoAt?: Date | null,
+) => ({
   ...toApi(m, photoAt),
   branch: { id: b.id, code: b.code, name: b.name },
   current_contract,
+  pt_contract,
 });
 
 async function assertUnique(phoneVal?: string, code?: string, exceptId?: string, faceId?: string | null) {
@@ -113,16 +120,23 @@ membersRouter.get('/', authorize('members.read'), async (req, res) => {
     prisma.member.count({ where }),
     prisma.member.findMany({ where, include: { branch: true }, orderBy: { createdAt: 'desc' }, skip: (q.page - 1) * q.limit, take: q.limit }),
   ]);
-  const [cur, photos] = await Promise.all([currentContracts(rows.map((r) => r.id)), photoTimes(rows.map((r) => r.id))]);
-  res.json({ data: rows.map((r) => withExtras(r, r.branch, cur.get(r.id) ?? null, photos.get(r.id))), meta: { page: q.page, limit: q.limit, total } });
+  const [sum, photos] = await Promise.all([memberContractSummaries(rows.map((r) => r.id)), photoTimes(rows.map((r) => r.id))]);
+  res.json({ data: rows.map((r) => withExtras(r, r.branch, sum.current.get(r.id) ?? null, sum.pt.get(r.id) ?? null, photos.get(r.id))), meta: { page: q.page, limit: q.limit, total } });
 });
 
 membersRouter.get('/:id', authorize('members.read'), async (req, res) => {
   const id = z.string().uuid().parse(req.params.id);
   const m = await prisma.member.findUnique({ where: { id }, include: { branch: true } });
   if (!m || !branchAllowed(req.access!, m.branchId)) throw notFound('Member not found');
-  const [cur, photos] = await Promise.all([currentContracts([m.id]), photoTimes([m.id])]);
-  res.json({ data: withExtras(m, m.branch, cur.get(m.id) ?? null, photos.get(m.id)) });
+  const [sum, photos] = await Promise.all([memberContractSummaries([m.id]), photoTimes([m.id])]);
+  res.json({ data: withExtras(m, m.branch, sum.current.get(m.id) ?? null, sum.pt.get(m.id) ?? null, photos.get(m.id)) });
+});
+
+membersRouter.get('/:id/pt-eligibility', authorize('members.read'), async (req, res) => {
+  const id = z.string().uuid().parse(req.params.id);
+  const m = await prisma.member.findUnique({ where: { id }, select: { branchId: true } });
+  if (!m || !branchAllowed(req.access!, m.branchId)) throw notFound('Member not found');
+  res.json({ data: await ptEligibility(id) });
 });
 
 membersRouter.post('/', authorize('members.create'), async (req, res) => {

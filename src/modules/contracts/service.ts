@@ -1,9 +1,20 @@
 import type { Contract, ContractEvent, Member, Package, Payment, Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
-import { dateOnly, fmtDate, todayVN } from '../../lib/dates';
+import { addMonths, dateOnly, fmtDate, todayVN } from '../../lib/dates';
 import { logger } from '../../lib/logger';
 
 export type Tx = Prisma.TransactionClient;
+
+/** Only the member package gives gym access. The three PT categories never do. */
+export const MEMBER_CATEGORIES = ['member'] as const;
+export const PT_CATEGORIES = ['pt_1on1', 'pt_1on2', 'pt_group'] as const;
+export const isPtCategory = (c: string | null | undefined) => !!c && c.startsWith('pt_');
+
+/** PT package usage deadline: contract end date + 3 months (30 sessions or fewer) or + 6 months (more than 30). */
+export function ptUsageDeadline(endDate: Date | null | undefined, sessionsTotal: number | null | undefined): Date | null {
+  if (!endDate) return null;
+  return addMonths(endDate, (sessionsTotal ?? 0) > 30 ? 6 : 3);
+}
 
 export async function lockContract(tx: Tx, id: string) {
   await tx.$queryRaw`SELECT id FROM contracts WHERE id = ${id}::uuid FOR UPDATE`;
@@ -30,7 +41,10 @@ export async function recalcPaid(tx: Tx, contractId: string) {
 }
 
 export async function syncMemberStatus(tx: Tx, memberId: string) {
-  const rows = await tx.contract.findMany({ where: { memberId }, select: { status: true, activatedAt: true } });
+  const rows = await tx.contract.findMany({
+    where: { memberId, package: { category: { in: [...MEMBER_CATEGORIES] } } },
+    select: { status: true, activatedAt: true },
+  });
   let status: 'active' | 'frozen' | 'expired' | null = null;
   if (rows.some((r) => r.status === 'active')) status = 'active';
   else if (rows.some((r) => r.status === 'frozen')) status = 'frozen';
@@ -61,7 +75,12 @@ export const paymentToApi = (p: PaymentWithContract) => ({
   ...(p.contract && { contract: { id: p.contract.id, code: p.contract.code, ...(p.contract.member && { member: { name: p.contract.member.name } }) } }),
 });
 
-type Extra = { branch?: { id: string; code: string; name: string } | null; last_payment_method?: string | null; user_names?: Map<string, string> };
+type Extra = {
+  branch?: { id: string; code: string; name: string } | null;
+  last_payment_method?: string | null;
+  user_names?: Map<string, string>;
+  bundled?: (Contract & { package: Package })[];
+};
 
 export async function lastPaymentMethods(contractIds: string[]) {
   const out = new Map<string, string>();
@@ -87,7 +106,9 @@ type CurRow = {
   endDate: Date | null;
   sessionsLeft: number | null;
   createdAt: Date;
-  package: { name: string; type: string };
+  sessionsTotal: number | null;
+  packageName: string | null;
+  package: { name: string; type: string; category: string };
 };
 
 function currentToApi(r: CurRow) {
@@ -95,7 +116,7 @@ function currentToApi(r: CurRow) {
     id: r.id,
     code: r.code,
     status: r.status,
-    package_name: r.package.name,
+    package_name: r.packageName ?? r.package.name,
     package_type: r.package.type,
     start_date: fmtDate(r.startDate),
     end_date: fmtDate(r.endDate),
@@ -105,9 +126,38 @@ function currentToApi(r: CurRow) {
 
 export type CurrentContract = ReturnType<typeof currentToApi>;
 
-export async function currentContracts(memberIds: string[]) {
-  const out = new Map<string, CurrentContract>();
-  if (!memberIds.length) return out;
+function ptToApi(r: CurRow, today: Date) {
+  const deadline = ptUsageDeadline(r.endDate, r.sessionsTotal);
+  return {
+    id: r.id,
+    code: r.code,
+    status: r.status,
+    package_name: r.packageName ?? r.package.name,
+    start_date: fmtDate(r.startDate),
+    end_date: fmtDate(r.endDate),
+    sessions_total: r.sessionsTotal,
+    sessions_left: r.sessionsLeft,
+    usage_deadline: fmtDate(deadline),
+    usage_valid: deadline === null || deadline >= today,
+  };
+}
+
+export type PtContract = ReturnType<typeof ptToApi>;
+
+const PT_RANK = (r: CurRow, today: Date) => {
+  const d = ptUsageDeadline(r.endDate, r.sessionsTotal);
+  const usable = (d === null || d >= today) && (r.status === 'active' || r.status === 'expired' || r.status === 'frozen');
+  if (usable && r.status !== 'expired') return 1;
+  if (usable) return 2;
+  if (r.status === 'signed' || r.status === 'draft') return 3;
+  return 4;
+};
+
+export async function memberContractSummaries(memberIds: string[], now = new Date()) {
+  const current = new Map<string, CurrentContract>();
+  const pt = new Map<string, PtContract>();
+  if (!memberIds.length) return { current, pt };
+  const today = dateOnly(todayVN(now));
   const rows: CurRow[] = await prisma.contract.findMany({
     where: { memberId: { in: memberIds } },
     select: {
@@ -118,8 +168,10 @@ export async function currentContracts(memberIds: string[]) {
       startDate: true,
       endDate: true,
       sessionsLeft: true,
+      sessionsTotal: true,
+      packageName: true,
       createdAt: true,
-      package: { select: { name: true, type: true } },
+      package: { select: { name: true, type: true, category: true } },
     },
   });
   const better = (a: CurRow, b: CurRow) => {
@@ -129,13 +181,31 @@ export async function currentContracts(memberIds: string[]) {
     if (ra === 1 && dayKey(a.endDate) !== dayKey(b.endDate)) return dayKey(a.endDate) > dayKey(b.endDate);
     return a.createdAt > b.createdAt;
   };
-  const best = new Map<string, CurRow>();
+  const betterPt = (a: CurRow, b: CurRow) => {
+    const ra = PT_RANK(a, today);
+    const rb = PT_RANK(b, today);
+    if (ra !== rb) return ra < rb;
+    if (dayKey(a.endDate) !== dayKey(b.endDate)) return dayKey(a.endDate) > dayKey(b.endDate);
+    return a.createdAt > b.createdAt;
+  };
+  const bestMember = new Map<string, CurRow>();
+  const bestPt = new Map<string, CurRow>();
   for (const r of rows) {
-    const cur = best.get(r.memberId);
-    if (!cur || better(r, cur)) best.set(r.memberId, r);
+    if (isPtCategory(r.package.category)) {
+      const cur = bestPt.get(r.memberId);
+      if (!cur || betterPt(r, cur)) bestPt.set(r.memberId, r);
+    } else if ((MEMBER_CATEGORIES as readonly string[]).includes(r.package.category)) {
+      const cur = bestMember.get(r.memberId);
+      if (!cur || better(r, cur)) bestMember.set(r.memberId, r);
+    }
   }
-  for (const [m, r] of best) out.set(m, currentToApi(r));
-  return out;
+  for (const [m, r] of bestMember) current.set(m, currentToApi(r));
+  for (const [m, r] of bestPt) pt.set(m, ptToApi(r, today));
+  return { current, pt };
+}
+
+export async function currentContracts(memberIds: string[]) {
+  return (await memberContractSummaries(memberIds)).current;
 }
 
 export function contractToApi(c: Full, extra: Extra = {}) {
@@ -158,16 +228,28 @@ export function contractToApi(c: Full, extra: Extra = {}) {
     activated_at: c.activatedAt,
     frozen_until: fmtDate(c.frozenUntil),
     renewed_from_id: c.renewedFromId,
+    bundle_of_id: c.bundleOfId,
     note: c.note,
     created_at: c.createdAt,
     ...(c.member && { member: { id: c.member.id, code: c.member.code, name: c.member.name, phone: c.member.phone } }),
-    ...(c.package && { package: { id: c.package.id, name: c.package.name, type: c.package.type } }),
+    ...(c.package && { package: { id: c.package.id, name: c.packageName ?? c.package.name, type: c.package.type, category: c.package.category } }),
+    ...(isPtCategory(c.package?.category) && { usage_deadline: fmtDate(ptUsageDeadline(c.endDate, c.sessionsTotal)) }),
     ...(c.events && {
       events: c.events.map((e) => ({ id: e.id, type: e.type, by_user: e.byUser, by_user_name: (e.byUser && extra.user_names?.get(e.byUser)) || null, reason: e.reason, diff: e.diff, created_at: e.createdAt })),
     }),
     ...(c.payments && { payments: c.payments.map(paymentToApi) }),
     ...(extra.branch && { branch: { id: extra.branch.id, code: extra.branch.code, name: extra.branch.name } }),
     ...(extra.last_payment_method !== undefined && { last_payment_method: extra.last_payment_method }),
+    ...(extra.bundled && {
+      bundled_contracts: extra.bundled.map((b) => ({
+        id: b.id,
+        code: b.code,
+        status: b.status,
+        start_date: fmtDate(b.startDate),
+        end_date: fmtDate(b.endDate),
+        package: { id: b.package.id, name: b.packageName ?? b.package.name, type: b.package.type, category: b.package.category },
+      })),
+    }),
   };
 }
 
@@ -204,4 +286,67 @@ export function startExpireJob(everyMs = 3600_000) {
   const t = setInterval(run, everyMs);
   t.unref();
   return t;
+}
+
+export type PtEligibility = {
+  eligible: boolean;
+  reasons: ('MEMBER_PACKAGE_EXPIRED' | 'NO_PT_PACKAGE' | 'PT_USAGE_EXPIRED')[];
+  member_package: { ok: boolean; contract_code: string | null; end_date: string | null };
+  pt_package: {
+    ok: boolean;
+    contract_code: string | null;
+    end_date: string | null;
+    usage_deadline: string | null;
+    sessions_left: number | null;
+  };
+};
+
+/**
+ * A PT may assign the member to a session and complete it only when BOTH hold:
+ * 1) the member package (gym or combo) is currently valid, and
+ * 2) today is not past the PT package usage deadline (PT end date + 3 months for 30 sessions or fewer, + 6 months above).
+ */
+export async function ptEligibility(memberId: string, now = new Date()): Promise<PtEligibility> {
+  const today = dateOnly(todayVN(now));
+  const rows = await prisma.contract.findMany({
+    where: { memberId, package: { category: { in: [...MEMBER_CATEGORIES, ...PT_CATEGORIES] } } },
+    select: {
+      code: true,
+      status: true,
+      startDate: true,
+      endDate: true,
+      sessionsLeft: true,
+      sessionsTotal: true,
+      createdAt: true,
+      package: { select: { category: true } },
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+  const memberOk = rows
+    .filter((r) => !isPtCategory(r.package.category) && r.status === 'active' && (!r.startDate || r.startDate <= today) && (!r.endDate || r.endDate >= today))
+    .sort((a, b) => (b.endDate?.getTime() ?? Infinity) - (a.endDate?.getTime() ?? Infinity))[0];
+  const ptRows = rows
+    .filter((r) => isPtCategory(r.package.category) && ['active', 'expired'].includes(r.status))
+    .map((r) => ({ r, deadline: ptUsageDeadline(r.endDate, r.sessionsTotal) }));
+  const usable = ptRows
+    .filter((x) => x.deadline === null || x.deadline >= today)
+    .sort((a, b) => (b.deadline?.getTime() ?? Infinity) - (a.deadline?.getTime() ?? Infinity))[0];
+  const anyPt = ptRows.sort((a, b) => (b.deadline?.getTime() ?? 0) - (a.deadline?.getTime() ?? 0))[0];
+  const pick = usable ?? anyPt;
+  const reasons: PtEligibility['reasons'] = [];
+  if (!memberOk) reasons.push('MEMBER_PACKAGE_EXPIRED');
+  if (!pick) reasons.push('NO_PT_PACKAGE');
+  else if (!usable) reasons.push('PT_USAGE_EXPIRED');
+  return {
+    eligible: reasons.length === 0,
+    reasons,
+    member_package: { ok: !!memberOk, contract_code: memberOk?.code ?? null, end_date: fmtDate(memberOk?.endDate) },
+    pt_package: {
+      ok: !!usable,
+      contract_code: pick?.r.code ?? null,
+      end_date: fmtDate(pick?.r.endDate),
+      usage_deadline: fmtDate(pick?.deadline),
+      sessions_left: pick?.r.sessionsLeft ?? null,
+    },
+  };
 }
