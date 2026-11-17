@@ -11,7 +11,7 @@ export const PERMISSIONS: string[] = [
   ...expand('debt', ['write_off']),
   ...expand('shifts', ['open', 'close']),
   ...expand('checkins', ['create', 'read', 'override']),
-  ...expand('pt_sessions', ['read', 'complete']),
+  ...expand('pt_sessions', ['read', 'create', 'complete', 'cancel']),
   ...expand('classes', ['attendance']),
   ...expand('bookings', ['create']),
   ...expand('reports', ['view', 'view_revenue', 'export']),
@@ -38,6 +38,10 @@ const OPS = [
   'checkins.read',
   'checkins.create',
   'checkins.override',
+  'pt_sessions.read',
+  'pt_sessions.create',
+  'pt_sessions.complete',
+  'pt_sessions.cancel',
 ];
 
 const VIEW_ONLY_REMOVED = ['contracts.override_checkin', 'checkins.create', 'checkins.override'];
@@ -98,6 +102,9 @@ export const ROLES: RoleDef[] = [
       'payments.read',
       'checkins.create',
       'checkins.read',
+      'pt_sessions.read',
+      'pt_sessions.create',
+      'pt_sessions.cancel',
       'shifts.open',
       'shifts.close',
       'me.read',

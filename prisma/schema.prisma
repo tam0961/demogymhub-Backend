@@ -13,17 +13,17 @@ enum MemberStatus {
   frozen
 }
 
-enum PackageType {
-  day
-  month
-  session
-}
-
 enum PackageCategory {
   member
   pt_1on1
   pt_1on2
   pt_group
+}
+
+enum PackageType {
+  day
+  month
+  session
 }
 
 enum ContractStatus {
@@ -61,13 +61,15 @@ model Branch {
   address   String?
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
 
-  userRoles UserRole[]
-  members   Member[]
-  packages  Package[]
-  contracts Contract[]
-  payments  Payment[]
-  shifts    Shift[]
-  checkins  Checkin[]
+  userRoles    UserRole[]
+  members      Member[]
+  packages     Package[]
+  contracts    Contract[]
+  payments     Payment[]
+  shifts       Shift[]
+  checkins     Checkin[]
+  ptSessions   PtSession[]
+  groupClasses GroupClass[]
 
   @@map("branches")
 }
@@ -85,10 +87,12 @@ model User {
   lastLoginAt   DateTime? @map("last_login_at") @db.Timestamptz
   createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
 
-  refreshTokens RefreshToken[]
-  authTokens    AuthToken[]
-  userRoles     UserRole[]    @relation("UserRoleUser")
-  granted       UserRole[]    @relation("UserRoleGrantedBy")
+  refreshTokens   RefreshToken[]
+  authTokens      AuthToken[]
+  userRoles       UserRole[]     @relation("UserRoleUser")
+  granted         UserRole[]     @relation("UserRoleGrantedBy")
+  trainerSessions PtSession[]    @relation("PtTrainer")
+  taughtClasses   GroupClass[]   @relation("ClassTrainer")
 
   @@map("users")
 }
@@ -216,7 +220,10 @@ model Member {
   branch    Branch     @relation(fields: [branchId], references: [id])
   contracts Contract[]
   checkins  Checkin[]
-  photo     MemberPhoto?
+
+  photo      MemberPhoto?
+  ptSessions PtSession[]
+  groupRegs  GroupRegistration[]
 
   @@index([branchId])
   @@index([status])
@@ -224,24 +231,24 @@ model Member {
 }
 
 model Package {
-  id           String      @id @default(uuid()) @db.Uuid
-  name         String
-  type         PackageType
-  category     PackageCategory @default(member)
-  bundledMemberPackageId String? @map("bundled_member_package_id") @db.Uuid
-  bundleOnly   Boolean     @default(false) @map("bundle_only")
-  gift         String?     @db.VarChar(200)
-  displayGroup PackageCategory? @map("display_group")
-  checkinBefore String?    @map("checkin_before") @db.VarChar(5)
-  replacesId   String?     @map("replaces_id") @db.Uuid
-  durationDays Int?        @map("duration_days")
-  sessions     Int?
-  price        Int
-  vatPercent   Int         @default(0) @map("vat_percent")
-  branchId     String      @map("branch_id") @db.Uuid
-  active       Boolean     @default(true)
-  createdAt    DateTime    @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt    DateTime    @updatedAt @map("updated_at") @db.Timestamptz
+  id                     String          @id @default(uuid()) @db.Uuid
+  name                   String
+  type                   PackageType
+  category               PackageCategory @default(member)
+  bundledMemberPackageId String?         @map("bundled_member_package_id") @db.Uuid
+  bundleOnly             Boolean         @default(false) @map("bundle_only")
+  gift                   String?         @db.VarChar(200)
+  displayGroup           PackageCategory? @map("display_group")
+  checkinBefore          String?         @map("checkin_before") @db.VarChar(5)
+  replacesId             String?         @map("replaces_id") @db.Uuid
+  durationDays           Int?            @map("duration_days")
+  sessions               Int?
+  price                  Int
+  vatPercent             Int             @default(0) @map("vat_percent")
+  branchId               String          @map("branch_id") @db.Uuid
+  active                 Boolean         @default(true)
+  createdAt              DateTime        @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt              DateTime        @updatedAt @map("updated_at") @db.Timestamptz
 
   branch        Branch     @relation(fields: [branchId], references: [id])
   contracts     Contract[]
@@ -282,14 +289,16 @@ model Contract {
   createdAt     DateTime       @default(now()) @map("created_at") @db.Timestamptz
   updatedAt     DateTime       @updatedAt @map("updated_at") @db.Timestamptz
 
-  member   Member          @relation(fields: [memberId], references: [id])
-  package  Package         @relation(fields: [packageId], references: [id])
-  branch   Branch          @relation(fields: [branchId], references: [id])
-  events   ContractEvent[]
-  payments Payment[]
-  checkins Checkin[]
-  bundleOf Contract?       @relation("Bundle", fields: [bundleOfId], references: [id], onDelete: SetNull)
-  bundled  Contract[]      @relation("Bundle")
+  member     Member              @relation(fields: [memberId], references: [id])
+  package    Package             @relation(fields: [packageId], references: [id])
+  branch     Branch              @relation(fields: [branchId], references: [id])
+  events     ContractEvent[]
+  payments   Payment[]
+  checkins   Checkin[]
+  bundleOf   Contract?       @relation("Bundle", fields: [bundleOfId], references: [id], onDelete: SetNull)
+  bundled    Contract[]      @relation("Bundle")
+  ptSessions PtSession[]
+  groupRegs  GroupRegistration[]
 
   @@index([memberId])
   @@index([branchId, status])
@@ -410,4 +419,95 @@ model MemberPhoto {
   member Member @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
   @@map("member_photos")
+}
+
+enum PtSessionStatus {
+  scheduled
+  completed
+  cancelled
+  no_show
+}
+
+model PtSession {
+  id          String          @id @default(uuid()) @db.Uuid
+  branchId    String          @map("branch_id") @db.Uuid
+  trainerId   String          @map("trainer_id") @db.Uuid
+  memberId    String?         @map("member_id") @db.Uuid
+  contractId  String?         @map("contract_id") @db.Uuid
+  startAt     DateTime        @map("start_at") @db.Timestamptz
+  endAt       DateTime        @map("end_at") @db.Timestamptz
+  status      PtSessionStatus @default(scheduled)
+  source      String          @default("manual")
+  note        String?
+  completedAt DateTime?       @map("completed_at") @db.Timestamptz
+  createdBy   String?         @map("created_by") @db.Uuid
+  createdAt   DateTime        @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime        @updatedAt @map("updated_at") @db.Timestamptz
+
+  branch   Branch    @relation(fields: [branchId], references: [id])
+  trainer  User      @relation("PtTrainer", fields: [trainerId], references: [id])
+  member   Member?   @relation(fields: [memberId], references: [id])
+  contract Contract? @relation(fields: [contractId], references: [id])
+
+  @@index([branchId, startAt])
+  @@index([trainerId, startAt])
+  @@index([memberId])
+  @@map("pt_sessions")
+}
+
+enum GroupClassStatus {
+  scheduled
+  completed
+  cancelled
+}
+
+enum GroupRegStatus {
+  booked
+  attended
+  cancelled
+}
+
+model GroupClass {
+  id          String           @id @default(uuid()) @db.Uuid
+  branchId    String           @map("branch_id") @db.Uuid
+  trainerId   String?          @map("trainer_id") @db.Uuid
+  title       String           @default("PT nhóm")
+  startAt     DateTime         @map("start_at") @db.Timestamptz
+  endAt       DateTime         @map("end_at") @db.Timestamptz
+  capacity    Int              @default(3)
+  status      GroupClassStatus @default(scheduled)
+  completedAt DateTime?        @map("completed_at") @db.Timestamptz
+  createdBy   String?          @map("created_by") @db.Uuid
+  createdAt   DateTime         @default(now()) @map("created_at") @db.Timestamptz
+
+  branch        Branch              @relation(fields: [branchId], references: [id])
+  trainer       User?               @relation("ClassTrainer", fields: [trainerId], references: [id])
+  registrations GroupRegistration[]
+
+  @@index([branchId, startAt])
+  @@map("group_classes")
+}
+
+model GroupRegistration {
+  id          String         @id @default(uuid()) @db.Uuid
+  classId     String         @map("class_id") @db.Uuid
+  memberId    String         @map("member_id") @db.Uuid
+  contractId  String?        @map("contract_id") @db.Uuid
+  name        String
+  phone       String
+  email       String?
+  status      GroupRegStatus @default(booked)
+  deducted    Boolean        @default(false)
+  source      String         @default("manual")
+  createdBy   String?        @map("created_by") @db.Uuid
+  createdAt   DateTime       @default(now()) @map("created_at") @db.Timestamptz
+  cancelledAt DateTime?      @map("cancelled_at") @db.Timestamptz
+
+  class    GroupClass @relation(fields: [classId], references: [id], onDelete: Cascade)
+  member   Member     @relation(fields: [memberId], references: [id])
+  contract Contract?  @relation(fields: [contractId], references: [id])
+
+  @@index([classId])
+  @@index([memberId])
+  @@map("group_registrations")
 }

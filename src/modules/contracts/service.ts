@@ -129,7 +129,7 @@ function currentToApi(r: CurRow) {
 export type CurrentContract = ReturnType<typeof currentToApi>;
 
 /** Is this PT contract still usable today? 1:1 uses the HSD window; 1:2 and group are usable until their own end date. */
-function ptUsable(r: { status: string; endDate: Date | null; sessionsTotal: number | null; category: string }, today: Date) {
+export function ptUsable(r: { status: string; endDate: Date | null; sessionsTotal: number | null; category: string }, today: Date) {
   if (hasUsageDeadline(r.category)) {
     const d = ptUsageDeadline(r.endDate, r.sessionsTotal);
     return (r.status === 'active' || r.status === 'expired') && (d === null || d >= today);

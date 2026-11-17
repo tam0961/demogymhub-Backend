@@ -29,6 +29,7 @@ const schema = z.object({
   SEED_DEMO_PASSWORD: z.string().optional(),
   PAYMENT_WEBHOOK_SECRET: z.string().default(''),
   WEBHOOK_TOLERANCE_SEC: z.coerce.number().default(300),
+  PT_BOT_KEY: z.string().default(''),
   VIETQR_BANK_ID: z.string().default(''),
   VIETQR_ACCOUNT_NO: z.string().default(''),
   VIETQR_ACCOUNT_NAME: z.string().default(''),
