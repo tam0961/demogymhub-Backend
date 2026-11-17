@@ -72,6 +72,7 @@ async function evaluate(req: Request, m: Member, branchId: string): Promise<Outc
       status: { in: ['active', 'frozen', 'expired'] },
       package: { category: 'member' },
     },
+    include: { package: { select: { checkinBefore: true } } },
     orderBy: [{ endDate: { sort: 'desc', nulls: 'first' } }, { createdAt: 'desc' }],
   });
   const deductedToday = new Set(
@@ -80,10 +81,13 @@ async function evaluate(req: Request, m: Member, branchId: string): Promise<Outc
   let noSessions: Contract | null = null;
   let frozen: Contract | null = null;
   let expired: Contract | null = null;
+  let outside: Contract | null = null;
+  const nowHm = new Date(Date.now() + 7 * 3600_000).toISOString().slice(11, 16);
   for (const c of contracts) {
     if (c.status === 'frozen') frozen ??= c;
     else if (c.status === 'expired' || (c.endDate && c.endDate < today)) expired ??= c;
     else if (c.startDate && c.startDate > today) continue;
+    else if (c.package?.checkinBefore && nowHm >= c.package.checkinBefore) outside ??= c;
     else if (c.sessionsTotal != null && (c.sessionsLeft ?? 0) <= 0 && !deductedToday.has(c.id)) noSessions ??= c;
     else {
       const res = await prisma.$transaction(async (tx) => {
@@ -120,6 +124,7 @@ async function evaluate(req: Request, m: Member, branchId: string): Promise<Outc
   }
   if (frozen) return logDenied(req, m, m.branchId, 'FROZEN', frozen);
   if (noSessions) return logDenied(req, m, m.branchId, 'NO_SESSIONS', noSessions);
+  if (outside) return logDenied(req, m, m.branchId, 'OUTSIDE_HOURS', outside);
   if (expired) return logDenied(req, m, m.branchId, 'EXPIRED', expired);
   return logDenied(req, m, m.branchId, 'NO_ACTIVE_CONTRACT', null);
 }

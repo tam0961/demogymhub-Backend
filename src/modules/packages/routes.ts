@@ -26,6 +26,9 @@ const base = z.object({
   branch_id: uuid.optional(),
   active: z.boolean().default(true),
   bundled_member_package_id: uuid.nullish(),
+  bundle_only: z.boolean().default(false),
+  gift: z.string().trim().max(200).nullish(),
+  checkin_before: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).nullish(),
   replaces_id: uuid.nullish(),
   deactivate_replaced: z.boolean().default(false),
 });
@@ -46,6 +49,9 @@ const patchSchema = z.object({
   vat_percent: z.number().int().min(0).max(100).optional(),
   active: z.boolean().optional(),
   bundled_member_package_id: uuid.nullish(),
+  bundle_only: z.boolean().optional(),
+  gift: z.string().trim().max(200).nullish(),
+  checkin_before: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).nullish(),
 });
 
 const listSchema = z.object({
@@ -82,6 +88,9 @@ const toApi = (p: PackageRow) => ({
   bundled_member_package: p.bundledMember
     ? { id: p.bundledMember.id, name: p.bundledMember.name, duration_days: p.bundledMember.durationDays, price: p.bundledMember.price }
     : null,
+  bundle_only: p.bundleOnly,
+  gift: p.gift,
+  checkin_before: p.checkinBefore,
   replaces_id: p.replacesId,
   ...(p._count && { contracts_count: p._count.contracts, in_use: p._count.contracts > 0 }),
 });
@@ -140,6 +149,9 @@ packagesRouter.post('/', authorize('packages.create'), async (req, res) => {
         active: b.active,
         branchId,
         bundledMemberPackageId: b.bundled_member_package_id ?? null,
+        bundleOnly: b.category === 'member' && b.bundle_only,
+        gift: b.gift || null,
+        checkinBefore: b.category === 'member' ? b.checkin_before ?? null : null,
         replacesId: old?.id ?? null,
       },
       include,
@@ -192,6 +204,9 @@ packagesRouter.patch('/:id', authorize('packages.update'), async (req, res) => {
       ...(b.vat_percent !== undefined && { vatPercent: b.vat_percent }),
       ...(b.active !== undefined && { active: b.active }),
       ...(b.bundled_member_package_id !== undefined && { bundledMemberPackageId: b.bundled_member_package_id }),
+      ...(b.bundle_only !== undefined && { bundleOnly: b.bundle_only }),
+      ...(b.gift !== undefined && { gift: b.gift || null }),
+      ...(b.checkin_before !== undefined && { checkinBefore: b.checkin_before }),
       ...(!isPtCategory(nextCategory) && { bundledMemberPackageId: null }),
     },
   });

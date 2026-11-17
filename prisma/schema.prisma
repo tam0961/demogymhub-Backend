@@ -229,6 +229,9 @@ model Package {
   type         PackageType
   category     PackageCategory @default(member)
   bundledMemberPackageId String? @map("bundled_member_package_id") @db.Uuid
+  bundleOnly   Boolean     @default(false) @map("bundle_only")
+  gift         String?     @db.VarChar(200)
+  checkinBefore String?    @map("checkin_before") @db.VarChar(5)
   replacesId   String?     @map("replaces_id") @db.Uuid
   durationDays Int?        @map("duration_days")
   sessions     Int?

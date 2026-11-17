@@ -100,6 +100,7 @@ contractsRouter.post('/', authorize('contracts.create'), async (req, res) => {
   if (!pkg || !branchAllowed(req.access!, pkg.branchId)) throw notFound('Package not found');
   if (pkg.branchId !== member.branchId) throw conflict('BRANCH_MISMATCH', 'Member and package belong to different branches');
   if (!pkg.active) throw conflict('PACKAGE_INACTIVE', 'Package is not active');
+  if (pkg.bundleOnly) throw conflict('BUNDLE_ONLY', 'This package is only given together with a PT package');
   const bundledPkg = isPtCategory(pkg.category) && pkg.bundledMemberPackageId ? await prisma.package.findUnique({ where: { id: pkg.bundledMemberPackageId } }) : null;
   if (bundledPkg && !bundledPkg.active) throw conflict('BUNDLED_PACKAGE_INACTIVE', 'The member package included with this PT package is no longer active');
   const eff = applyPromo(pkg, b.discount, b.promo);

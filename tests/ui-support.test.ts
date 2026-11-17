@@ -720,3 +720,41 @@ describe('HSD applies to PT 1:1 only', () => {
     expect(groupActive.eligible).toBe(true);
   });
 });
+
+describe('package options: bundle only, gift, check-in time limit', () => {
+  const mgr = (m: 'post' | 'patch', url: string, body: object) => request(app)[m](url).set(hA('branch_manager')).send(body);
+
+  it('a bundle-only package cannot be sold alone and keeps gift and time limit', async () => {
+    const created = await mgr('post', '/api/packages', {
+      name: `Gift ${uniq()}`, type: 'month', category: 'member', duration_days: 30, price: 0, branch_id: A,
+      bundle_only: true, gift: 'Tui TH Gym', checkin_before: '14:00',
+    });
+    expect(created.status).toBe(201);
+    expect(created.body.data).toMatchObject({ bundle_only: true, gift: 'Tui TH Gym', checkin_before: '14:00' });
+    const mem = await mkMember(A);
+    const sale = await mgr('post', '/api/contracts', { member_id: mem.id, package_id: created.body.data.id });
+    expect(sale.body.error.code).toBe('BUNDLE_ONLY');
+    const pt = await mgr('post', '/api/packages', {
+      name: `PT ${uniq()}`, type: 'session', category: 'pt_1on1', sessions: 10, price: 100, branch_id: A, bundled_member_package_id: created.body.data.id,
+    });
+    expect(pt.status).toBe(201);
+    const sold = await mgr('post', '/api/contracts', { member_id: mem.id, package_id: pt.body.data.id });
+    expect(sold.status).toBe(201);
+    expect(sold.body.data.bundled_contracts).toHaveLength(1);
+    const keep = await mgr('patch', `/api/packages/${created.body.data.id}`, { active: true });
+    expect(keep.body.data).toMatchObject({ bundle_only: true, gift: 'Tui TH Gym', checkin_before: '14:00' });
+  });
+
+  it('check-in is denied from the limit hour on, and allowed before it', async () => {
+    const run = async (limit: string) => {
+      const m = await mkMember(A);
+      const c = await mkContract(m.id, A, { status: 'active' });
+      await prisma.package.update({ where: { id: c.packageId! }, data: { checkinBefore: limit } });
+      return (await request(app).post('/api/checkins').set(hA('receptionist')).send({ member_id: m.id })).body.data;
+    };
+    const late = await run('00:00');
+    expect(late).toMatchObject({ result: 'denied', reason: 'OUTSIDE_HOURS' });
+    const ok = await run('23:59');
+    expect(ok.result).toBe('allowed');
+  });
+});
