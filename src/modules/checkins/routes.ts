@@ -72,7 +72,7 @@ async function evaluate(req: Request, m: Member, branchId: string): Promise<Outc
       status: { in: ['active', 'frozen', 'expired'] },
       package: { category: 'member' },
     },
-    include: { package: { select: { checkinBefore: true } } },
+    include: { package: { select: { checkinBefore: true, displayGroup: true } } },
     orderBy: [{ endDate: { sort: 'desc', nulls: 'first' } }, { createdAt: 'desc' }],
   });
   const deductedToday = new Set(
@@ -88,14 +88,14 @@ async function evaluate(req: Request, m: Member, branchId: string): Promise<Outc
     else if (c.status === 'expired' || (c.endDate && c.endDate < today)) expired ??= c;
     else if (c.startDate && c.startDate > today) continue;
     else if (c.package?.checkinBefore && nowHm >= c.package.checkinBefore) outside ??= c;
-    else if (c.sessionsTotal != null && (c.sessionsLeft ?? 0) <= 0 && !deductedToday.has(c.id)) noSessions ??= c;
+    else if (c.package?.displayGroup !== 'pt_group' && c.sessionsTotal != null && (c.sessionsLeft ?? 0) <= 0 && !deductedToday.has(c.id)) noSessions ??= c;
     else {
       const res = await prisma.$transaction(async (tx) => {
         await lockContract(tx, c.id);
         const f = await tx.contract.findUniqueOrThrow({ where: { id: c.id } });
         if (f.status !== 'active') return null;
         let deduct = false;
-        if (f.sessionsTotal != null) {
+        if (f.sessionsTotal != null && c.package?.displayGroup !== 'pt_group') {
           const already = await tx.checkin.count({ where: { contractId: f.id, deductedDay: today } });
           if (!already) {
             if ((f.sessionsLeft ?? 0) <= 0) return 'NO_SESSIONS' as const;
