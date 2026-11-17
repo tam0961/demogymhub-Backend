@@ -14,7 +14,7 @@ export async function setup() {
     const { default: EmbeddedPostgres } = await import(mod);
     pgDir = path.join(os.tmpdir(), `gymhub-pgtest-${process.pid}`);
     fs.rmSync(pgDir, { recursive: true, force: true });
-    const port = 54329;
+    const port = Number(process.env.TEST_PG_PORT ?? 54329);
     const server = new EmbeddedPostgres({ databaseDir: pgDir, user: 'gymhub', password: 'gymhub', port, persistent: false, initdbFlags: ['--encoding=UTF8', '--locale=C'] });
     await server.initialise();
     await server.start();
