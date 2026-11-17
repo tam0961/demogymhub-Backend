@@ -9,7 +9,7 @@ import { authenticate, authorize } from '../../middlewares/auth';
 import { branchFilter } from '../rbac/scope';
 import { branchAllowed, can } from '../rbac/service';
 import { contractPdf } from './pdf';
-import { addEvent, contractToApi, isPtCategory, lastPaymentMethods, lockContract, syncMemberStatus, type Tx } from './service';
+import { addEvent, contractToApi, isPtCategory, lastPaymentDates, lastPaymentMethods, lockContract, syncMemberStatus, type Tx } from './service';
 
 export const contractsRouter = Router();
 contractsRouter.use(authenticate);
@@ -196,7 +196,8 @@ contractsRouter.get('/', authorize('contracts.read'), async (req, res) => {
     }),
   ]);
   const lpm = await lastPaymentMethods(rows.map((r) => r.id));
-  res.json({ data: rows.map((r) => contractToApi(r, { branch: r.branch, last_payment_method: lpm.get(r.id) ?? null })), meta: { page: q.page, limit: q.limit, total } });
+  const lpd = await lastPaymentDates(rows.map((r) => r.id));
+  res.json({ data: rows.map((r) => contractToApi(r, { branch: r.branch, last_payment_method: lpm.get(r.id) ?? null, last_paid_at: lpd.get(r.id) ?? null })), meta: { page: q.page, limit: q.limit, total } });
 });
 
 contractsRouter.get('/:id', authorize('contracts.read'), async (req, res) => {

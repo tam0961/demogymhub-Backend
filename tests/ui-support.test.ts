@@ -770,3 +770,18 @@ describe('display group', () => {
     expect(keep.body.data.display_group).toBe('pt_group');
   });
 });
+
+describe('contract list payment date', () => {
+  it('returns last_paid_at from the latest confirmed payment', async () => {
+    const m = await mkMember(A);
+    const c = await mkContract(m.id, A, { status: 'active', total: 1000, paid: 500 });
+    const when = new Date('2030-05-04T03:00:00Z');
+    await prisma.payment.create({ data: { contractId: c.id, branchId: A, method: 'cash', amount: 500, status: 'confirmed', ref: `RF${uniq()}`, confirmedAt: when } });
+    const r = await request(app).get(`/api/contracts?q=${c.code}`).set(hA('receptionist'));
+    const row = r.body.data.find((x: { id: string }) => x.id === c.id);
+    expect(new Date(row.last_paid_at).toISOString()).toBe(when.toISOString());
+    const none = await mkContract(m.id, A, { status: 'active' });
+    const r2 = await request(app).get(`/api/contracts?q=${none.code}`).set(hA('receptionist'));
+    expect(r2.body.data.find((x: { id: string }) => x.id === none.id).last_paid_at).toBeNull();
+  });
+});

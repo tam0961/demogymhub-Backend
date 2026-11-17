@@ -80,6 +80,7 @@ export const paymentToApi = (p: PaymentWithContract) => ({
 type Extra = {
   branch?: { id: string; code: string; name: string } | null;
   last_payment_method?: string | null;
+  last_paid_at?: Date | null;
   user_names?: Map<string, string>;
   bundled?: (Contract & { package: Package })[];
 };
@@ -93,6 +94,18 @@ export async function lastPaymentMethods(contractIds: string[]) {
     select: { contractId: true, method: true },
   });
   for (const r of rows) if (!out.has(r.contractId)) out.set(r.contractId, r.method);
+  return out;
+}
+
+export async function lastPaymentDates(contractIds: string[]) {
+  const out = new Map<string, Date>();
+  if (!contractIds.length) return out;
+  const rows = await prisma.payment.findMany({
+    where: { contractId: { in: contractIds }, status: 'confirmed' },
+    orderBy: [{ confirmedAt: 'desc' }, { createdAt: 'desc' }],
+    select: { contractId: true, confirmedAt: true, createdAt: true },
+  });
+  for (const r of rows) if (!out.has(r.contractId)) out.set(r.contractId, r.confirmedAt ?? r.createdAt);
   return out;
 }
 
@@ -251,6 +264,7 @@ export function contractToApi(c: Full, extra: Extra = {}) {
     ...(c.payments && { payments: c.payments.map(paymentToApi) }),
     ...(extra.branch && { branch: { id: extra.branch.id, code: extra.branch.code, name: extra.branch.name } }),
     ...(extra.last_payment_method !== undefined && { last_payment_method: extra.last_payment_method }),
+    ...(extra.last_paid_at !== undefined && { last_paid_at: extra.last_paid_at }),
     ...(extra.bundled && {
       bundled_contracts: extra.bundled.map((b) => ({
         id: b.id,
