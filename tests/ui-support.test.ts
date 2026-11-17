@@ -653,3 +653,70 @@ describe('contract keeps the package name from the time of sale', () => {
     expect(detail.body.data.package.name).toBe(pk.name);
   });
 });
+
+describe('HSD applies to PT 1:1 only', () => {
+  const iso = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
+  const days = (n: number) => addDays(today(), n);
+  const elig = (id: string) => request(app).get(`/api/members/${id}/pt-eligibility`).set(hA('receptionist'));
+  const pt = (memberId: string, category: 'pt_1on1' | 'pt_1on2' | 'pt_group', endDays: number, total = 20) =>
+    mkContract(memberId, A, { status: endDays < 0 ? 'expired' : 'active', type: 'session', category, sessionsTotal: total, sessionsLeft: 5, end: days(endDays) });
+
+  it('only 1:1 contracts expose usage_deadline', async () => {
+    const m = await mkMember(A);
+    const one = await pt(m.id, 'pt_1on1', 10);
+    const two = await pt(m.id, 'pt_1on2', 10);
+    const grp = await pt(m.id, 'pt_group', 10);
+    const get = async (id: string) => (await request(app).get(`/api/contracts/${id}`).set(hA('receptionist'))).body.data;
+    expect((await get(one.id)).usage_deadline).toBe(iso(addMonths(days(10), 3)));
+    expect(await get(two.id)).not.toHaveProperty('usage_deadline');
+    expect(await get(grp.id)).not.toHaveProperty('usage_deadline');
+  });
+
+  it('member list: pt_contract has a deadline only for 1:1 and usable status follows each rule', async () => {
+    const m1 = await mkMember(A);
+    await pt(m1.id, 'pt_1on1', -20);
+    const r1 = (await request(app).get(`/api/members?q=${m1.code}`).set(hA('receptionist'))).body.data[0].pt_contract;
+    expect(r1).toMatchObject({ package_category: 'pt_1on1', usage_valid: true });
+    expect(r1.usage_deadline).toBe(iso(addMonths(days(-20), 3)));
+
+    const m2 = await mkMember(A);
+    await pt(m2.id, 'pt_1on2', -20);
+    const r2 = (await request(app).get(`/api/members?q=${m2.code}`).set(hA('receptionist'))).body.data[0].pt_contract;
+    expect(r2).toMatchObject({ package_category: 'pt_1on2', usage_deadline: null, usage_valid: false });
+
+    const m3 = await mkMember(A);
+    await pt(m3.id, 'pt_group', 15);
+    const r3 = (await request(app).get(`/api/members?q=${m3.code}`).set(hA('receptionist'))).body.data[0].pt_contract;
+    expect(r3).toMatchObject({ package_category: 'pt_group', usage_deadline: null, usage_valid: true });
+  });
+
+  it('eligibility: 1:1 gets the HSD window, 1:2 and group must still be inside their own end date', async () => {
+    const mk = async (category: 'pt_1on1' | 'pt_1on2' | 'pt_group', endDays: number, total = 20) => {
+      const m = await mkMember(A);
+      await mkContract(m.id, A, { status: 'active', end: days(30) });
+      await pt(m.id, category, endDays, total);
+      return m.id;
+    };
+    const oneInWindow = (await elig(await mk('pt_1on1', -30))).body.data;
+    expect(oneInWindow.eligible).toBe(true);
+    expect(oneInWindow.pt_package.category).toBe('pt_1on1');
+    expect(oneInWindow.pt_package.usage_deadline).toBe(iso(addMonths(days(-30), 3)));
+
+    const oneOut = (await elig(await mk('pt_1on1', -100))).body.data;
+    expect(oneOut.reasons).toEqual(['PT_USAGE_EXPIRED']);
+    const oneBig = (await elig(await mk('pt_1on1', -100, 40))).body.data;
+    expect(oneBig.eligible).toBe(true);
+
+    const twoActive = (await elig(await mk('pt_1on2', 10))).body.data;
+    expect(twoActive.eligible).toBe(true);
+    expect(twoActive.pt_package.usage_deadline).toBeNull();
+    expect(twoActive.pt_package.category).toBe('pt_1on2');
+    const twoEnded = (await elig(await mk('pt_1on2', -1))).body.data;
+    expect(twoEnded.eligible).toBe(false);
+    expect(twoEnded.reasons).toEqual(['PT_PACKAGE_EXPIRED']);
+    const groupEnded = (await elig(await mk('pt_group', -30))).body.data;
+    expect(groupEnded.reasons).toEqual(['PT_PACKAGE_EXPIRED']);
+    const groupActive = (await elig(await mk('pt_group', 5))).body.data;
+    expect(groupActive.eligible).toBe(true);
+  });
+});
