@@ -70,6 +70,7 @@ model Branch {
   checkins     Checkin[]
   ptSessions   PtSession[]
   groupClasses GroupClass[]
+  ptDayOffs    PtDayOff[]
 
   @@map("branches")
 }
@@ -93,6 +94,7 @@ model User {
   granted         UserRole[]     @relation("UserRoleGrantedBy")
   trainerSessions PtSession[]    @relation("PtTrainer")
   taughtClasses   GroupClass[]   @relation("ClassTrainer")
+  ptDayOffs       PtDayOff[]     @relation("PtDayOffTrainer")
 
   @@map("users")
 }
@@ -554,4 +556,19 @@ model Lead {
 
   @@index([branchId, status])
   @@map("leads")
+}
+
+model PtDayOff {
+  id        String   @id @default(uuid()) @db.Uuid
+  branchId  String   @map("branch_id") @db.Uuid
+  trainerId String   @map("trainer_id") @db.Uuid
+  date      DateTime @db.Date
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  branch  Branch @relation(fields: [branchId], references: [id])
+  trainer User   @relation("PtDayOffTrainer", fields: [trainerId], references: [id])
+
+  @@unique([trainerId, branchId, date])
+  @@index([branchId, date])
+  @@map("pt_day_off")
 }

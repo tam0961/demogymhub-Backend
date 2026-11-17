@@ -121,7 +121,10 @@ membersRouter.get('/', authorize('members.read'), async (req, res) => {
     prisma.member.findMany({ where, include: { branch: true }, orderBy: { createdAt: 'desc' }, skip: (q.page - 1) * q.limit, take: q.limit }),
   ]);
   const [sum, photos] = await Promise.all([memberContractSummaries(rows.map((r) => r.id)), photoTimes(rows.map((r) => r.id))]);
-  res.json({ data: rows.map((r) => withExtras(r, r.branch, sum.current.get(r.id) ?? null, sum.pt.get(r.id) ?? null, photos.get(r.id))), meta: { page: q.page, limit: q.limit, total } });
+  const debtRows = await prisma.contract.findMany({ where: { memberId: { in: rows.map((r) => r.id) }, status: { notIn: ['draft', 'cancelled'] } }, select: { memberId: true, totalAmount: true, paidAmount: true } });
+  const debt = new Map<string, number>();
+  for (const c of debtRows) debt.set(c.memberId, (debt.get(c.memberId) ?? 0) + Math.max(0, c.totalAmount - c.paidAmount));
+  res.json({ data: rows.map((r) => ({ ...withExtras(r, r.branch, sum.current.get(r.id) ?? null, sum.pt.get(r.id) ?? null, photos.get(r.id)), debt_amount: debt.get(r.id) ?? 0 })), meta: { page: q.page, limit: q.limit, total } });
 });
 
 membersRouter.get('/:id', authorize('members.read'), async (req, res) => {

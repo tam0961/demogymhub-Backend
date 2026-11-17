@@ -32,6 +32,7 @@ const listSchema = z.object({
   member_id: uuid.optional(),
   status: z.enum(['draft', 'signed', 'active', 'frozen', 'expired', 'cancelled']).optional(),
   branch_id: uuid.optional(),
+  category: z.enum(['member', 'pt_1on1', 'pt_1on2', 'pt_group']).optional(),
   expiring_within_days: z.coerce.number().int().min(0).max(365).optional(),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(20),
@@ -172,6 +173,7 @@ contractsRouter.get('/', authorize('contracts.read'), async (req, res) => {
   const where: Prisma.ContractWhereInput = { ...branchFilter(req, q.branch_id) };
   if (q.member_id) where.memberId = q.member_id;
   if (q.status) where.status = q.status;
+  if (q.category) where.package = { category: q.category };
   if (q.expiring_within_days !== undefined) {
     const today = dateOnly(todayVN());
     where.status = 'active';

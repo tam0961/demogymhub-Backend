@@ -85,15 +85,35 @@ ptRouter.get('/sessions', authorize('pt_sessions.read'), async (req, res) => {
   res.json({ data: rows.map(toApi) });
 });
 
+const offRangeSchema = z.object({ from: z.string().regex(DATE_RE), to: z.string().regex(DATE_RE), branch_id: z.string().uuid().optional() });
+const offBodySchema = z.object({ trainer_id: z.string().uuid(), date: z.string().regex(DATE_RE), off: z.boolean(), branch_id: z.string().uuid().optional() });
+
+ptRouter.get('/off', authorize('pt_sessions.read'), async (req, res) => {
+  const q = offRangeSchema.parse(req.query);
+  const rows = await prisma.ptDayOff.findMany({ where: { ...branchFilter(req, q.branch_id), date: { gte: dateOnly(q.from), lte: dateOnly(q.to) } }, orderBy: { date: 'asc' } });
+  res.json({ data: rows.map((r) => ({ trainer_id: r.trainerId, branch_id: r.branchId, date: r.date.toISOString().slice(0, 10) })) });
+});
+
+ptRouter.put('/off', authorize('pt_sessions.create'), async (req, res) => {
+  const b = offBodySchema.parse(req.body);
+  const branchId = writeBranch(req, b.branch_id);
+  await assertTrainer(b.trainer_id, branchId);
+  const key = { trainerId: b.trainer_id, branchId, date: dateOnly(b.date) };
+  if (b.off) await prisma.ptDayOff.upsert({ where: { trainerId_branchId_date: key }, create: key, update: {} });
+  else await prisma.ptDayOff.deleteMany({ where: key });
+  await audit(req.auth!.userId, b.off ? 'pt.day_off.set' : 'pt.day_off.clear', { trainer_id: b.trainer_id, date: b.date }, req.ip, b.trainer_id);
+  res.json({ data: { trainer_id: b.trainer_id, branch_id: branchId, date: b.date, off: b.off } });
+});
+
 ptRouter.get('/trainers', authorize('pt_sessions.read'), async (req, res) => {
   const branchId = z.string().uuid().optional().parse(req.query.branch_id);
   const bf = branchFilter(req, branchId);
   const users = await prisma.user.findMany({
     where: { status: 'active', userRoles: { some: { role: { key: 'trainer' }, ...(bf.branchId && { branchId: bf.branchId }) } } },
-    select: { id: true, name: true },
+    select: { id: true, name: true, userRoles: { where: { role: { key: 'trainer' } }, select: { branch: { select: { id: true, name: true } } } } },
     orderBy: { name: 'asc' },
   });
-  res.json({ data: users });
+  res.json({ data: users.map((u) => ({ id: u.id, name: u.name, branches: u.userRoles.flatMap((r) => (r.branch ? [r.branch] : [])) })) });
 });
 
 const createSchema = z.object({
@@ -329,6 +349,9 @@ ptBotRouter.post('/message', async (req, res) => {
     }
     const t = found[0];
     const r = await syncZaloShifts(b.branch_id, t.id, parsed.date, entry.off ? [] : entry.hours);
+    const offKey = { trainerId: t.id, branchId: b.branch_id, date: dateOnly(parsed.date) };
+    if (entry.off) await prisma.ptDayOff.upsert({ where: { trainerId_branchId_date: offKey }, create: offKey, update: {} });
+    else await prisma.ptDayOff.deleteMany({ where: offKey });
     reported.add(t.id);
     results.push({ trainer: t.name, off: entry.off, ...r });
   }

@@ -255,7 +255,7 @@ export function contractToApi(c: Full, extra: Extra = {}) {
     bundle_of_id: c.bundleOfId,
     note: c.note,
     created_at: c.createdAt,
-    ...(c.member && { member: { id: c.member.id, code: c.member.code, name: c.member.name, phone: c.member.phone } }),
+    ...(c.member && { member: { id: c.member.id, code: c.member.code, name: c.member.name, phone: c.member.phone, email: c.member.email } }),
     ...(c.package && { package: { id: c.package.id, name: c.packageName ?? c.package.name, type: c.package.type, category: c.package.category } }),
     ...(hasUsageDeadline(c.package?.category) && { usage_deadline: fmtDate(ptUsageDeadline(c.endDate, c.sessionsTotal)) }),
     ...(c.events && {

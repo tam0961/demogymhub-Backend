@@ -186,7 +186,10 @@ paymentsRouter.get('/', authorize('payments.read'), async (req, res) => {
     prisma.payment.count({ where }),
     prisma.payment.findMany({ where, orderBy: { createdAt: 'desc' }, skip: (q.page - 1) * q.limit, take: q.limit, include: { contract: { select: { id: true, code: true, member: { select: { name: true } } } } } }),
   ]);
-  res.json({ data: rows.map(paymentToApi), meta: { page: q.page, limit: q.limit, total } });
+  const staffIds = [...new Set(rows.flatMap((r) => (r.createdBy ? [r.createdBy] : [])))];
+  const staff = staffIds.length ? await prisma.user.findMany({ where: { id: { in: staffIds } }, select: { id: true, name: true } }) : [];
+  const staffName = new Map(staff.map((u) => [u.id, u.name]));
+  res.json({ data: rows.map((r) => ({ ...paymentToApi(r), created_by_name: r.createdBy ? staffName.get(r.createdBy) ?? null : null })), meta: { page: q.page, limit: q.limit, total } });
 });
 
 paymentsRouter.get('/:id/qr', authorize('payments.read'), async (req, res) => {
