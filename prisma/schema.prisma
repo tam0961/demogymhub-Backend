@@ -473,6 +473,7 @@ model GroupClass {
   branchId    String           @map("branch_id") @db.Uuid
   trainerId   String?          @map("trainer_id") @db.Uuid
   title       String           @default("PT nhóm")
+  muscleGroup String?          @map("muscle_group")
   startAt     DateTime         @map("start_at") @db.Timestamptz
   endAt       DateTime         @map("end_at") @db.Timestamptz
   capacity    Int              @default(3)
@@ -511,4 +512,18 @@ model GroupRegistration {
   @@index([classId])
   @@index([memberId])
   @@map("group_registrations")
+}
+
+model GroupClassTemplate {
+  id          String  @id @default(uuid()) @db.Uuid
+  branchId    String  @map("branch_id") @db.Uuid
+  weekday     Int
+  startTime   String  @map("start_time") @db.VarChar(5)
+  endTime     String  @map("end_time") @db.VarChar(5)
+  capacity    Int     @default(3)
+  muscleGroup String? @map("muscle_group")
+  active      Boolean @default(true)
+
+  @@unique([branchId, weekday, startTime])
+  @@map("group_class_templates")
 }

@@ -3,7 +3,8 @@ import { z } from 'zod';
 import type { Prisma } from '@prisma/client';
 import { audit } from '../../lib/audit';
 import { DATE_RE, dayRange } from '../../lib/dates';
-import { badRequest, forbidden, notFound } from '../../lib/errors';
+import { badRequest, conflict, forbidden, notFound } from '../../lib/errors';
+import { hashPassword, randomToken } from '../../lib/crypto';
 import { prisma } from '../../lib/prisma';
 import { authenticate, authorize } from '../../middlewares/auth';
 import { ROLES } from '../rbac/permissions';
@@ -88,6 +89,31 @@ adminRouter.get('/users', authenticate, authorize('roles.read'), async (req, res
     })),
     meta: { page: q.page, limit: q.limit, total },
   });
+});
+
+const createUserSchema = z.object({
+  name: z.string().trim().min(1).max(100),
+  email: z.string().trim().toLowerCase().email().max(200),
+  password: z.string().min(10).max(100).optional(),
+  role: z.string().min(1).max(50),
+  branch_id: uuid.nullish(),
+});
+
+adminRouter.post('/users', authenticate, authorize('roles.assign'), async (req, res) => {
+  const b = createUserSchema.parse(req.body);
+  const def = ROLES.find((r) => r.key === b.role);
+  if (!def || b.role === 'member') throw badRequest('ROLE_INVALID', 'Unknown or unsupported role');
+  await guardRole(req, b.role, 'assign');
+  if (!def.global && !b.branch_id) throw badRequest('BRANCH_REQUIRED', 'This role needs a branch');
+  if (b.branch_id && !(await prisma.branch.findUnique({ where: { id: b.branch_id }, select: { id: true } }))) throw notFound('Branch not found');
+  if (await prisma.user.findUnique({ where: { email: b.email }, select: { id: true } })) throw conflict('EMAIL_TAKEN', 'Email already used');
+  const generated = b.password ? null : randomToken().slice(0, 14);
+  const user = await prisma.user.create({
+    data: { email: b.email, name: b.name, passwordHash: await hashPassword(b.password ?? generated!), emailVerified: true },
+  });
+  await assignRole(user.id, b.role, def.global ? null : b.branch_id!, req.auth!.userId);
+  await audit(req.auth!.userId, 'user.created', { email: user.email, role: b.role, branch_id: b.branch_id ?? null }, req.ip, user.id);
+  res.status(201).json({ data: { id: user.id, email: user.email, name: user.name, password: generated } });
 });
 
 adminRouter.post('/users/:id/roles', authenticate, authorize('roles.assign'), async (req, res) => {

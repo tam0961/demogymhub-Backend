@@ -120,3 +120,62 @@ describe('group classes', () => {
     expect(await sessionsLeft()).toBe(before);
   });
 });
+
+describe('group class templates and rules', () => {
+  it('generates a week from templates once, and lets staff edit muscle group', async () => {
+    const t = await request(app).post('/api/pt/classes/templates').set(h(reception)).send({ weekday: 2, start_time: '06:30', end_time: '07:45', capacity: 3, muscle_group: 'Core + Cardio' });
+    expect(t.status).toBe(201);
+    const g1 = await request(app).post('/api/pt/classes/generate').set(h(reception)).send({ week_start: '2031-03-03' });
+    expect(g1.status).toBe(200);
+    expect(g1.body.data.created).toBeGreaterThanOrEqual(1);
+    const g2 = await request(app).post('/api/pt/classes/generate').set(h(reception)).send({ week_start: '2031-03-03' });
+    expect(g2.body.data.created).toBe(0);
+    expect((await request(app).post('/api/pt/classes/generate').set(h(reception)).send({ week_start: '2031-03-04' })).status).toBe(400);
+    const list = await request(app).get('/api/pt/classes').set(h(reception)).query({ from: '2031-03-04', to: '2031-03-04' });
+    const cls = list.body.data.find((c: { muscle_group: string }) => c.muscle_group === 'Core + Cardio');
+    expect(cls).toBeTruthy();
+    const patched = await request(app).patch(`/api/pt/classes/${cls.id}`).set(h(reception)).send({ muscle_group: 'Lưng + Vai' });
+    expect(patched.body.data.muscle_group).toBe('Lưng + Vai');
+  });
+
+  it('locks registration after 21:00 the day before, and counts cancels per member', async () => {
+    const soon = await request(app).post('/api/pt/classes').set(h(reception)).send({ trainer_id: trainerId, start_at: new Date(Date.now() + 3600000).toISOString(), capacity: 3 });
+    const locked = await request(app).post(`/api/pt/classes/${soon.body.data.id}/registrations`).set(h(reception)).send({ member_id: memberId });
+    expect(locked.status).toBe(409);
+    expect(locked.body.error.code).toBe('CLASS_LOCKED');
+
+    const cls = await mkClass();
+    const reg = await request(app).post(`/api/pt/classes/${cls}/registrations`).set(h(reception)).send({ member_id: memberId });
+    await request(app).post(`/api/pt/classes/registrations/${reg.body.data.id}/cancel`).set(h(reception));
+    const rows = await request(app).get('/api/pt/classes/registrations').set(h(reception)).query({ status: 'cancelled' });
+    expect(rows.body.data.some((r: { cancel_count: number }) => r.cancel_count >= 1)).toBe(true);
+  });
+
+  it('monthly report lists completed classes per trainer', async () => {
+    const r = await request(app).get('/api/pt/classes/report').set(h(reception)).query({ months: 12 });
+    expect(r.status).toBe(200);
+    expect(Array.isArray(r.body.data)).toBe(true);
+  });
+});
+
+describe('staff creation', () => {
+  it('owner can create a trainer with a generated password; manager and receptionist cannot', async () => {
+    const mgrEmail = `ow${u()}@t.local`;
+    await makeUser(mgrEmail, 'owner', null);
+    const mgr = await tokenFor(mgrEmail);
+    const bmEmail = `bm${u()}@t.local`;
+    await makeUser(bmEmail, 'branch_manager', 'nb');
+    const bm = await tokenFor(bmEmail);
+    const email = `new${u()}@t.local`;
+    const ok = await request(app).post('/api/users').set(h(mgr)).send({ name: 'PT Moi', email, role: 'trainer', branch_id: nb });
+    expect(ok.status).toBe(201);
+    expect(ok.body.data.password).toBeTruthy();
+    expect((await request(app).post('/api/users').set(h(mgr)).send({ name: 'Dup', email, role: 'trainer', branch_id: nb })).status).toBe(409);
+    expect((await request(app).post('/api/users').set(h(mgr)).send({ name: 'No branch', email: `x${u()}@t.local`, role: 'trainer' })).status).toBe(400);
+    expect((await request(app).post('/api/users').set(h(mgr)).send({ name: 'Too high', email: `y${u()}@t.local`, role: 'owner' })).status).toBe(403);
+    expect((await request(app).post('/api/users').set(h(bm)).send({ name: 'Mgr', email: `w${u()}@t.local`, role: 'trainer', branch_id: nb })).status).toBe(403);
+    expect((await request(app).post('/api/users').set(h(reception)).send({ name: 'Nope', email: `z${u()}@t.local`, role: 'trainer', branch_id: nb })).status).toBe(403);
+    const list = await request(app).get('/api/pt/trainers').set(h(mgr));
+    expect(list.body.data.some((t: { name: string }) => t.name === 'PT Moi')).toBe(true);
+  });
+});
