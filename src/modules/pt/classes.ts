@@ -51,7 +51,7 @@ const classToApi = (c: ClassRow) => ({
 
 const regInclude = {
   class: { select: { id: true, title: true, muscleGroup: true, startAt: true, endAt: true, status: true, trainer: { select: { id: true, name: true } } } },
-  contract: { select: { code: true } },
+  contract: { select: { code: true, sessionsLeft: true } },
 } satisfies Prisma.GroupRegistrationInclude;
 
 type RegRow = Prisma.GroupRegistrationGetPayload<{ include: typeof regInclude }>;
@@ -66,6 +66,7 @@ const regToApi = (r: RegRow) => ({
   deducted: r.deducted,
   source: r.source,
   contract_code: r.contract?.code ?? null,
+  sessions_left: r.contract?.sessionsLeft ?? null,
   created_at: r.createdAt.toISOString(),
   class: {
     id: r.class.id,
