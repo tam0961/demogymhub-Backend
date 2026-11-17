@@ -170,3 +170,47 @@ reportsRouter.get('/checkin-stats', authorize('checkins.read'), async (req, res)
     data: { date, branches: out, totals: { checkins_today: sum('checkins_today'), denied_today: sum('denied_today'), inside_now: sum('inside_now') } },
   });
 });
+
+const expiringQ = z.object({ days: z.enum(['7', '14', '30']).default('7'), branch_id: z.string().uuid().optional() });
+
+reportsRouter.get('/expiring', authorize('reports.view'), async (req, res) => {
+  const p = expiringQ.parse(req.query);
+  const days = Number(p.days);
+  const today = dateOnly(todayVN());
+  const rows = await prisma.contract.findMany({
+    where: { ...branchFilter(req, p.branch_id), status: 'active', package: { category: 'member' }, endDate: { gte: today, lte: addDays(today, days) } },
+    orderBy: { endDate: 'asc' },
+    select: {
+      endDate: true,
+      packageName: true,
+      package: { select: { name: true } },
+      member: { select: { id: true, name: true, phone: true, code: true } },
+      branch: { select: { id: true, code: true, name: true } },
+    },
+  });
+  const renewed = new Set(
+    (
+      await prisma.contract.findMany({
+        where: { memberId: { in: rows.map((c) => c.member.id) }, status: { in: ['active', 'signed'] }, package: { category: 'member' }, endDate: { gt: addDays(today, days) } },
+        select: { memberId: true },
+      })
+    ).map((c) => c.memberId),
+  );
+  const seen = new Set<string>(renewed);
+  const data = [];
+  for (const c of rows) {
+    if (seen.has(c.member.id)) continue;
+    seen.add(c.member.id);
+    data.push({
+      member_id: c.member.id,
+      member_code: c.member.code,
+      name: c.member.name,
+      phone: c.member.phone,
+      package_name: c.packageName ?? c.package.name,
+      end_date: c.endDate!.toISOString().slice(0, 10),
+      days_left: Math.round((c.endDate!.getTime() - today.getTime()) / 86400000),
+      branch: c.branch,
+    });
+  }
+  res.json({ data, meta: { days, total: data.length } });
+});

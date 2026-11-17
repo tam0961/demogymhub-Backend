@@ -19,6 +19,7 @@ import { paymentsRouter } from './modules/payments/routes';
 import { publicRouter } from './modules/pt/public';
 import { ptBotRouter, ptRouter } from './modules/pt/routes';
 import { reportsRouter } from './modules/reports/routes';
+import { leadsRouter } from './modules/leads/routes';
 import { shiftsRouter } from './modules/shifts/routes';
 
 declare global {
@@ -82,6 +83,7 @@ export function createApp() {
   app.use('/api/pt/bot', ptBotRouter);
   app.use('/api/pt', ptRouter);
   app.use('/api/reports', reportsRouter);
+  app.use('/api/leads', leadsRouter);
   app.use('/api', adminRouter);
 
   app.use(notFoundHandler);

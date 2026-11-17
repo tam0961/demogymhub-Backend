@@ -527,3 +527,30 @@ model GroupClassTemplate {
   @@unique([branchId, weekday, startTime])
   @@map("group_class_templates")
 }
+
+enum LeadStatus {
+  new
+  contacted
+  trial_booked
+  converted
+  lost
+}
+
+model Lead {
+  id         String     @id @default(uuid()) @db.Uuid
+  name       String
+  phone      String
+  email      String?
+  source     String?
+  status     LeadStatus @default(new)
+  note       String?
+  branchId   String     @map("branch_id") @db.Uuid
+  assignedTo String?    @map("assigned_to") @db.Uuid
+  trialAt    DateTime?  @map("trial_at") @db.Timestamptz
+  memberId   String?    @map("member_id") @db.Uuid
+  createdAt  DateTime   @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt  DateTime   @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@index([branchId, status])
+  @@map("leads")
+}

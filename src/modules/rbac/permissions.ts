@@ -81,6 +81,7 @@ export const ROLES: RoleDef[] = [
       ...expand('members', CRUD),
       ...expand('packages', ['create', 'read', 'update']),
       ...OPS,
+      ...expand('leads', CRUD),
       'reports.view',
       'me.read',
     ],
@@ -90,6 +91,9 @@ export const ROLES: RoleDef[] = [
     name: 'Receptionist',
     global: false,
     permissions: [
+      'leads.read',
+      'leads.create',
+      'leads.update',
       'members.create',
       'members.read',
       'members.update',
