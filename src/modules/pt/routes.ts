@@ -199,13 +199,79 @@ ptRouter.post('/sessions/:id/complete', authorize('pt_sessions.complete'), async
   res.json({ data: toApi(done) });
 });
 
+async function deduct(tx: Tx, s: PtSession, by: string, type: string) {
+  if (!s.contractId) return;
+  await lockContract(tx, s.contractId);
+  const c = await tx.contract.findUniqueOrThrow({ where: { id: s.contractId } });
+  if ((c.sessionsLeft ?? 0) <= 0) throw conflict('NO_SESSIONS', 'No sessions left on this contract');
+  await tx.contract.update({ where: { id: c.id }, data: { sessionsLeft: { decrement: 1 } } });
+  await addEvent(tx, c.id, type, by, null, { pt_session_id: s.id });
+}
+
+ptRouter.post('/sessions/:id/no-show', async (req, res) => {
+  const a = req.access!;
+  if (!can(a, 'pt_sessions.complete') && !can(a, 'pt_sessions.cancel')) throw forbidden();
+  const s = await loadSession(req);
+  if (ownOnly(req) && s.trainerId !== req.auth!.userId) throw forbidden('Not your session');
+  if (!s.memberId) throw conflict('NO_MEMBER', 'Session has no member');
+  const out = await prisma.$transaction(async (tx) => {
+    const flip = await tx.ptSession.updateMany({ where: { id: s.id, status: 'scheduled' }, data: { status: 'no_show' } });
+    if (flip.count === 0) throw conflict('NOT_SCHEDULED', 'Session is not in scheduled state');
+    await deduct(tx, s, req.auth!.userId, 'pt_session_no_show');
+    return tx.ptSession.findUniqueOrThrow({ where: { id: s.id }, include });
+  });
+  await audit(req.auth!.userId, 'pt_session.no_show', { before: toApi(s), after: toApi(out) }, req.ip, s.id);
+  res.json({ data: toApi(out) });
+});
+
+const updateSchema = z.object({
+  start_at: z.string().datetime({ offset: true }).optional(),
+  duration_min: z.number().int().min(15).max(240).optional(),
+  trainer_id: z.string().uuid().optional(),
+  contract_id: z.string().uuid().nullable().optional(),
+});
+
+ptRouter.patch('/sessions/:id', authorize('pt_sessions.create'), async (req, res) => {
+  const s = await loadSession(req);
+  const b = updateSchema.parse(req.body);
+  const trainerId = b.trainer_id ?? s.trainerId;
+  const startAt = b.start_at ? new Date(b.start_at) : s.startAt;
+  const endAt = new Date(startAt.getTime() + (b.duration_min ?? Math.round((s.endAt.getTime() - s.startAt.getTime()) / 60000)) * 60000);
+  const contractId = b.contract_id === undefined ? s.contractId : b.contract_id;
+  if (contractId && !s.memberId) throw badRequest('MEMBER_REQUIRED', 'contract_id needs a member');
+  if (trainerId !== s.trainerId) await assertTrainer(trainerId, s.branchId);
+  const out = await prisma.$transaction(async (tx) => {
+    await lockKey(tx, 'pt:' + trainerId);
+    const cur = await tx.ptSession.findUniqueOrThrow({ where: { id: s.id } });
+    if (cur.status !== 'scheduled') throw conflict('NOT_SCHEDULED', 'Session is not in scheduled state');
+    const busy = (who: Prisma.PtSessionWhereInput) =>
+      tx.ptSession.findFirst({ where: { id: { not: s.id }, status: { in: ['scheduled', 'completed'] }, startAt: { lt: endAt }, endAt: { gt: startAt }, ...who }, select: { id: true } });
+    if (await busy({ trainerId })) throw conflict('PT_BUSY', 'Trainer already has a session in this time');
+    if (s.memberId && (await busy({ memberId: s.memberId }))) throw conflict('MEMBER_BUSY', 'Member already has a session in this time');
+    if (s.memberId && contractId && contractId !== s.contractId) await checkPtContract(tx, s.memberId, contractId, s.branchId);
+    return tx.ptSession.update({ where: { id: s.id }, data: { trainerId, startAt, endAt, contractId }, include });
+  });
+  await audit(req.auth!.userId, 'pt_session.updated', { before: toApi(s), after: toApi(out) }, req.ip, s.id);
+  res.json({ data: toApi(out) });
+});
+
+const FREE_CANCEL_MIN = 90;
+const CANCEL_OVERRIDE_ROLES = ['super_admin', 'owner', 'branch_manager'];
+const cancelSchema = z.object({ cancel_free: z.boolean().optional() }).default({});
+
 ptRouter.post('/sessions/:id/cancel', authorize('pt_sessions.cancel'), async (req, res) => {
   const s = await loadSession(req);
-  const flip = await prisma.ptSession.updateMany({ where: { id: s.id, status: 'scheduled' }, data: { status: 'cancelled' } });
-  if (flip.count === 0) throw conflict('NOT_SCHEDULED', 'Session is not in scheduled state');
-  const after = await prisma.ptSession.findUniqueOrThrow({ where: { id: s.id }, include });
-  await audit(req.auth!.userId, 'pt_session.cancelled', { before: toApi(s), after: toApi(after) }, req.ip, s.id);
-  res.json({ data: toApi(after) });
+  const b = cancelSchema.parse(req.body ?? {});
+  if (b.cancel_free && !req.access!.roles.some((r) => CANCEL_OVERRIDE_ROLES.includes(r))) throw forbidden('Only owner or manager can cancel for free');
+  const late = !b.cancel_free && !!s.memberId && s.startAt.getTime() - Date.now() < FREE_CANCEL_MIN * 60000;
+  const out = await prisma.$transaction(async (tx) => {
+    const flip = await tx.ptSession.updateMany({ where: { id: s.id, status: 'scheduled' }, data: { status: late ? 'no_show' : 'cancelled' } });
+    if (flip.count === 0) throw conflict('NOT_SCHEDULED', 'Session is not in scheduled state');
+    if (late) await deduct(tx, s, req.auth!.userId, 'pt_session_late_cancel');
+    return tx.ptSession.findUniqueOrThrow({ where: { id: s.id }, include });
+  });
+  await audit(req.auth!.userId, late ? 'pt_session.late_cancelled' : 'pt_session.cancelled', { before: toApi(s), after: toApi(out) }, req.ip, s.id);
+  res.json({ data: toApi(out) });
 });
 
 ptRouter.use('/classes', classesRouter);

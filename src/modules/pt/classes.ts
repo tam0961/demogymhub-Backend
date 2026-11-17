@@ -103,7 +103,7 @@ classesRouter.get('/registrations', authorize('pt_sessions.read'), async (req, r
   const classWhere: Prisma.GroupClassWhereInput = { ...branchFilter(req, q.branch_id), startAt: rangeFilter(q) };
   const where: Prisma.GroupRegistrationWhereInput = { class: classWhere };
   if (ownOnly(req)) classWhere.trainerId = req.auth!.userId;
-  if (q.status && ['booked', 'attended', 'absent', 'cancelled'].includes(q.status)) where.status = q.status as 'booked';
+  if (q.status && ['booked', 'attended', 'absent', 'cancelled', 'waitlist'].includes(q.status)) where.status = q.status as 'booked';
   const rows = await prisma.groupRegistration.findMany({ where, include: regInclude, orderBy: [{ class: { startAt: 'asc' } }, { createdAt: 'asc' }], take: 1000 });
   const cancels = await prisma.groupRegistration.groupBy({ by: ['memberId'], where: { status: 'cancelled', memberId: { in: [...new Set(rows.map((r) => r.memberId))] } }, _count: { _all: true } });
   const byMember = new Map(cancels.map((c) => [c.memberId, c._count._all]));
@@ -118,14 +118,14 @@ classesRouter.get('/stats', authorize('pt_sessions.read'), async (req, res) => {
     where: classWhere,
     select: { status: true, capacity: true, trainer: { select: { id: true, name: true } }, registrations: { select: { status: true } } },
   });
-  const regs = { booked: 0, attended: 0, absent: 0, cancelled: 0 };
+  const regs = { booked: 0, attended: 0, absent: 0, cancelled: 0, waitlist: 0 };
   let seats = 0;
   let filled = 0;
   const perTrainer = new Map<string, { name: string; classes: number; attended: number }>();
   for (const c of classes) {
     for (const r of c.registrations) regs[r.status]++;
     if (c.status === 'cancelled') continue;
-    const live = c.registrations.filter((r) => r.status !== 'cancelled').length;
+    const live = c.registrations.filter((r) => r.status !== 'cancelled' && r.status !== 'waitlist').length;
     seats += c.capacity;
     filled += live;
     if (c.status === 'completed' && c.trainer) {
@@ -313,30 +313,60 @@ classesRouter.patch('/:id', authorize('pt_sessions.create'), async (req, res) =>
   res.json({ data: classToApi(out) });
 });
 
+async function pickGroupContract(tx: Tx, memberId: string, branchId: string) {
+  const today = dateOnly(todayVN());
+  const candidates = await tx.contract.findMany({
+    where: { memberId, branchId, status: { in: ['active', 'expired'] }, package: { OR: [{ category: 'pt_group' }, { displayGroup: 'pt_group' }] }, sessionsLeft: { gt: 0 } },
+    orderBy: { endDate: { sort: 'asc', nulls: 'last' } },
+  });
+  for (const c of candidates) {
+    if (!ptUsable({ status: c.status, endDate: c.endDate, sessionsTotal: c.sessionsTotal, category: 'pt_group' }, today)) continue;
+    await lockContract(tx, c.id);
+    const fresh = await tx.contract.findUniqueOrThrow({ where: { id: c.id } });
+    if ((fresh.sessionsLeft ?? 0) > 0) return c;
+  }
+  return null;
+}
+
+async function promoteWaitlist(tx: Tx, classId: string, by: string | null) {
+  const cls = await tx.groupClass.findUniqueOrThrow({ where: { id: classId } });
+  if (cls.status !== 'scheduled' || cls.startAt <= new Date()) return;
+  const live = await tx.groupRegistration.count({ where: { classId, status: { in: [...LIVE] } } });
+  if (live >= cls.capacity) return;
+  const waiting = await tx.groupRegistration.findMany({ where: { classId, status: 'waitlist' }, orderBy: { createdAt: 'asc' } });
+  for (const w of waiting) {
+    const elig = await ptEligibility(w.memberId);
+    if (!elig.member_package.ok) continue;
+    const pick = await pickGroupContract(tx, w.memberId, cls.branchId);
+    if (!pick) continue;
+    await tx.contract.update({ where: { id: pick.id }, data: { sessionsLeft: { decrement: 1 } } });
+    await tx.groupRegistration.update({ where: { id: w.id }, data: { status: 'booked', contractId: pick.id, deducted: true } });
+    await addEvent(tx, pick.id, 'group_class_reserved', by, 'promoted from waitlist', { registration_id: w.id, class_id: classId });
+    return;
+  }
+}
+
 export async function registerInTx(
   tx: Tx,
-  o: { classId: string; member: { id: string; name: string; phone: string; email: string | null }; createdBy: string | null; source: string; lockCheck: (startAt: Date) => void },
+  o: { classId: string; member: { id: string; name: string; phone: string; email: string | null }; createdBy: string | null; source: string; waitlist?: boolean; lockCheck: (startAt: Date) => void },
 ) {
     await lockKey(tx, 'class:' + o.classId);
     const cur = await tx.groupClass.findUniqueOrThrow({ where: { id: o.classId } });
     if (cur.status !== 'scheduled') throw conflict('CLASS_CLOSED', 'Class is not open for registration');
     if (cur.startAt <= new Date()) throw conflict('CLASS_STARTED', 'Class has already started');
     o.lockCheck(cur.startAt);
-    const live = await tx.groupRegistration.findMany({ where: { classId: o.classId, status: { in: [...LIVE] } }, select: { memberId: true } });
-    if (live.length >= cur.capacity) throw conflict('CLASS_FULL', 'Class is full');
+    const live = await tx.groupRegistration.findMany({ where: { classId: o.classId, status: { in: [...LIVE, 'waitlist'] } }, select: { memberId: true, status: true } });
     if (live.some((r) => r.memberId === o.member.id)) throw conflict('ALREADY_REGISTERED', 'Member is already registered');
+    if (live.filter((r) => r.status !== 'waitlist').length >= cur.capacity) {
+      if (!o.waitlist) throw conflict('CLASS_FULL', 'Class is full');
+      return tx.groupRegistration.create({
+        data: { classId: o.classId, memberId: o.member.id, name: o.member.name, phone: o.member.phone, email: o.member.email, status: 'waitlist', createdBy: o.createdBy, source: o.source },
+        include: regInclude,
+      });
+    }
 
-    const today = dateOnly(todayVN());
-    const candidates = await tx.contract.findMany({
-      where: { memberId: o.member.id, branchId: cur.branchId, status: { in: ['active', 'expired'] }, package: { OR: [{ category: 'pt_group' }, { displayGroup: 'pt_group' }] }, sessionsLeft: { gt: 0 } },
-      include: { package: { select: { category: true } } },
-      orderBy: { endDate: { sort: 'asc', nulls: 'last' } },
-    });
-    const pick = candidates.find((c) => ptUsable({ status: c.status, endDate: c.endDate, sessionsTotal: c.sessionsTotal, category: 'pt_group' }, today));
+    const pick = await pickGroupContract(tx, o.member.id, cur.branchId);
     if (!pick) throw conflict('NO_SESSIONS', 'Member has no usable PT group package with sessions left');
-    await lockContract(tx, pick.id);
-    const fresh = await tx.contract.findUniqueOrThrow({ where: { id: pick.id } });
-    if ((fresh.sessionsLeft ?? 0) <= 0) throw conflict('NO_SESSIONS', 'Member has no sessions left');
     await tx.contract.update({ where: { id: pick.id }, data: { sessionsLeft: { decrement: 1 } } });
     const created = await tx.groupRegistration.create({
       data: {
@@ -367,7 +397,7 @@ classesRouter.post('/:id/registrations', authorize('pt_sessions.create'), async 
   if (!elig.member_package.ok) throw conflict('MEMBER_PACKAGE_EXPIRED', 'Member package is no longer valid');
 
   const reg = await prisma.$transaction((tx) =>
-    registerInTx(tx, { classId: cls.id, member, createdBy: req.auth!.userId, source: 'manual', lockCheck: (startAt) => assertOpen(req, startAt) }),
+    registerInTx(tx, { classId: cls.id, member, createdBy: req.auth!.userId, source: 'manual', waitlist: true, lockCheck: (startAt) => assertOpen(req, startAt) }),
   );
   await audit(req.auth!.userId, 'group_registration.created', { after: regToApi(reg) }, req.ip, reg.id);
   res.status(201).json({ data: regToApi(reg) });
@@ -381,8 +411,9 @@ classesRouter.post('/registrations/:id/cancel', authorize('pt_sessions.cancel'),
   const out = await prisma.$transaction(async (tx) => {
     await lockKey(tx, 'class:' + found.classId);
     const cur = await tx.groupRegistration.findUniqueOrThrow({ where: { id } });
-    if (cur.status !== 'booked') throw conflict('NOT_BOOKED', 'Only booked registrations can be cancelled');
+    if (cur.status !== 'booked' && cur.status !== 'waitlist') throw conflict('NOT_BOOKED', 'Only booked registrations can be cancelled');
     await refund(tx, cur, req.auth!.userId, 'registration cancelled');
+    if (cur.status === 'booked') await promoteWaitlist(tx, found.classId, req.auth!.userId);
     return tx.groupRegistration.findUniqueOrThrow({ where: { id }, include: regInclude });
   });
   await audit(req.auth!.userId, 'group_registration.cancelled', { after: regToApi(out) }, req.ip, id);
@@ -443,6 +474,7 @@ classesRouter.post('/:id/cancel', authorize('pt_sessions.cancel'), async (req, r
     if (flip.count === 0) throw conflict('NOT_SCHEDULED', 'Class is not in scheduled state');
     const regs = await tx.groupRegistration.findMany({ where: { classId: cls.id, status: 'booked' } });
     for (const r of regs) await refund(tx, r, req.auth!.userId, 'class cancelled');
+    await tx.groupRegistration.updateMany({ where: { classId: cls.id, status: 'waitlist' }, data: { status: 'cancelled', cancelledAt: new Date() } });
     return tx.groupClass.findUniqueOrThrow({ where: { id: cls.id }, include: classInclude });
   });
   await audit(req.auth!.userId, 'group_class.cancelled', { after: classToApi(out) }, req.ip, cls.id);

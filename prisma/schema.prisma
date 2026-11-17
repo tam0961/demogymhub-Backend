@@ -466,6 +466,7 @@ enum GroupRegStatus {
   attended
   absent
   cancelled
+  waitlist
 }
 
 model GroupClass {
