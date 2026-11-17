@@ -758,3 +758,15 @@ describe('package options: bundle only, gift, check-in time limit', () => {
     expect(ok.result).toBe('allowed');
   });
 });
+
+describe('display group', () => {
+  it('a member package can be listed under PT nhom and still checks in as member', async () => {
+    const r = await request(app).post('/api/packages').set(hA('branch_manager')).send({
+      name: `PTN ${uniq()}`, type: 'month', category: 'member', duration_days: 30, price: 1, branch_id: A, display_group: 'pt_group',
+    });
+    expect(r.status).toBe(201);
+    expect(r.body.data).toMatchObject({ category: 'member', display_group: 'pt_group' });
+    const keep = await request(app).patch(`/api/packages/${r.body.data.id}`).set(hA('branch_manager')).send({ active: true });
+    expect(keep.body.data.display_group).toBe('pt_group');
+  });
+});
