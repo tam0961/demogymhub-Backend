@@ -243,6 +243,9 @@ model Package {
   displayGroup           PackageCategory? @map("display_group")
   checkinBefore          String?         @map("checkin_before") @db.VarChar(5)
   replacesId             String?         @map("replaces_id") @db.Uuid
+  promoType              String?         @map("promo_type")
+  promoValue             Int?            @map("promo_value")
+  promoUntil             DateTime?       @map("promo_until") @db.Date
   durationDays           Int?            @map("duration_days")
   sessions               Int?
   price                  Int

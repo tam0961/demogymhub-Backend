@@ -13,6 +13,7 @@ export const packagesRouter = Router();
 packagesRouter.use(authenticate);
 
 const CATEGORIES = ['member', 'pt_1on1', 'pt_1on2', 'pt_group'] as const;
+const PROMO_TYPES = ['bonus_months', 'bonus_days', 'bonus_sessions', 'percent', 'amount'] as const;
 const uuid = z.string().uuid();
 
 const base = z.object({
@@ -30,6 +31,9 @@ const base = z.object({
   display_group: z.enum(['pt_group']).nullish(),
   gift: z.string().trim().max(200).nullish(),
   checkin_before: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).nullish(),
+  promo_type: z.enum(PROMO_TYPES).nullish(),
+  promo_value: z.number().int().min(1).nullish(),
+  promo_until: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish(),
   replaces_id: uuid.nullish(),
   deactivate_replaced: z.boolean().default(false),
 });
@@ -54,6 +58,9 @@ const patchSchema = z.object({
   display_group: z.enum(['pt_group']).nullish(),
   gift: z.string().trim().max(200).nullish(),
   checkin_before: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).nullish(),
+  promo_type: z.enum(PROMO_TYPES).nullish(),
+  promo_value: z.number().int().min(1).nullish(),
+  promo_until: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish(),
 });
 
 const listSchema = z.object({
@@ -94,6 +101,9 @@ const toApi = (p: PackageRow) => ({
   display_group: p.displayGroup,
   gift: p.gift,
   checkin_before: p.checkinBefore,
+  promo_type: p.promoType,
+  promo_value: p.promoValue,
+  promo_until: p.promoUntil ? p.promoUntil.toISOString().slice(0, 10) : null,
   replaces_id: p.replacesId,
   ...(p._count && { contracts_count: p._count.contracts, in_use: p._count.contracts > 0 }),
 });
@@ -156,6 +166,9 @@ packagesRouter.post('/', authorize('packages.create'), async (req, res) => {
         displayGroup: b.category === 'member' ? b.display_group ?? null : null,
         gift: b.gift || null,
         checkinBefore: b.category === 'member' ? b.checkin_before ?? null : null,
+        promoType: b.promo_type ?? null,
+        promoValue: b.promo_type ? b.promo_value ?? null : null,
+        promoUntil: b.promo_type && b.promo_until ? new Date(`${b.promo_until}T00:00:00Z`) : null,
         replacesId: old?.id ?? null,
       },
       include,
@@ -212,9 +225,24 @@ packagesRouter.patch('/:id', authorize('packages.update'), async (req, res) => {
       ...(b.display_group !== undefined && { displayGroup: b.display_group }),
       ...(b.gift !== undefined && { gift: b.gift || null }),
       ...(b.checkin_before !== undefined && { checkinBefore: b.checkin_before }),
+      ...(b.promo_type !== undefined && { promoType: b.promo_type }),
+      ...(b.promo_value !== undefined && { promoValue: b.promo_value }),
+      ...(b.promo_until !== undefined && { promoUntil: b.promo_until ? new Date(`${b.promo_until}T00:00:00Z`) : null }),
       ...(!isPtCategory(nextCategory) && { bundledMemberPackageId: null }),
     },
   });
   await audit(req.auth!.userId, 'package.updated', { before: toApi(cur), after: toApi(p) }, req.ip, p.id);
   res.json({ data: toApi(p) });
+});
+
+packagesRouter.delete('/:id', authorize('packages.update'), async (req, res) => {
+  const id = uuid.parse(req.params.id);
+  const cur = await prisma.package.findUnique({ where: { id }, include });
+  if (!cur || !branchAllowed(req.access!, cur.branchId)) throw notFound('Package not found');
+  if ((cur._count?.contracts ?? 0) > 0) throw conflict('PACKAGE_IN_USE', 'This package already has contracts, so it cannot be deleted. Deactivate it by editing instead.');
+  const usedAsBundle = await prisma.package.count({ where: { bundledMemberPackageId: id } });
+  if (usedAsBundle > 0) throw conflict('PACKAGE_IS_BUNDLE', 'This member package is included in other packages, so it cannot be deleted.');
+  await prisma.package.delete({ where: { id } });
+  await audit(req.auth!.userId, 'package.deleted', { before: toApi(cur) }, req.ip, id);
+  res.json({ data: { id } });
 });

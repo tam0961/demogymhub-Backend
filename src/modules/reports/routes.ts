@@ -29,6 +29,17 @@ reportsRouter.get('/dashboard', authorize('reports.view'), async (req, res) => {
   const byMethod = zeroByMethod();
   for (const g of paidToday) byMethod[g.method] = g._sum.amount ?? 0;
 
+  const paidKinds = await prisma.payment.findMany({
+    where: { ...bf, status: 'confirmed', confirmedAt: range },
+    select: { amount: true, contract: { select: { package: { select: { category: true, displayGroup: true } } } } },
+  });
+  const byKind: Record<string, number> = { member: 0, pt_1on1: 0, pt_1on2: 0, pt_group: 0 };
+  for (const x of paidKinds) {
+    const pk = x.contract.package;
+    const kind = pk.displayGroup === 'pt_group' ? 'pt_group' : pk.category;
+    byKind[kind] = (byKind[kind] ?? 0) + x.amount;
+  }
+
   const from7 = addDays(dayStart, -6);
   const pay7 = await prisma.payment.findMany({
     where: { ...bf, status: 'confirmed', confirmedAt: { gte: dayRange(from7.toISOString().slice(0, 10)).gte, lt: range.lt } },
@@ -58,6 +69,7 @@ reportsRouter.get('/dashboard', authorize('reports.view'), async (req, res) => {
     data: {
       revenue_today: METHODS.reduce((s, m) => s + byMethod[m], 0),
       revenue_by_method: byMethod,
+      revenue_by_kind: byKind,
       new_contracts_today: newContracts,
       active_members: activeMembers,
       expiring_in_7_days: expiring,
