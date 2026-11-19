@@ -17,6 +17,7 @@ export const PERMISSIONS: string[] = [
   ...expand('reports', ['view', 'view_revenue', 'export']),
   ...expand('roles', ['read', 'assign']),
   ...expand('system', ['view_audit_log', 'manage_settings']),
+  ...expand('attendance', ['read', 'manage']),
   'me.read',
 ];
 
@@ -70,6 +71,8 @@ export const ROLES: RoleDef[] = [
       'roles.assign',
       'system.view_audit_log',
       'system.manage_settings',
+      'attendance.read',
+      'attendance.manage',
       'me.read',
     ],
   },
@@ -83,6 +86,7 @@ export const ROLES: RoleDef[] = [
       ...OPS,
       ...expand('leads', CRUD),
       'reports.view',
+      'attendance.read',
       'me.read',
     ],
   },

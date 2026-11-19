@@ -22,6 +22,8 @@ import { ptBotRouter, ptRouter } from './modules/pt/routes';
 import { reportsRouter } from './modules/reports/routes';
 import { leadsRouter } from './modules/leads/routes';
 import { shiftsRouter } from './modules/shifts/routes';
+import { zaloRouter } from './modules/zalo/routes';
+import { attendancePublicRouter, attendanceRouter } from './modules/attendance/routes';
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -80,6 +82,7 @@ export function createApp() {
   app.use('/api/payments', paymentsRouter);
   app.use('/api/shifts', shiftsRouter);
   app.use('/api/checkins', checkinsRouter);
+  app.use('/api/public/attendance', attendancePublicRouter);
   app.use('/api/public/ipad', ipadPublicRouter);
   app.use('/api/public', publicRouter);
   app.use('/api/ipad', ipadRouter);
@@ -87,6 +90,8 @@ export function createApp() {
   app.use('/api/pt', ptRouter);
   app.use('/api/reports', reportsRouter);
   app.use('/api/leads', leadsRouter);
+  app.use('/api/zalo', zaloRouter);
+  app.use('/api/attendance', attendanceRouter);
   app.use('/api', adminRouter);
 
   app.use(notFoundHandler);

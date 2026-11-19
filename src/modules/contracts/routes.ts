@@ -9,6 +9,7 @@ import { authenticate, authorize } from '../../middlewares/auth';
 import { branchFilter } from '../rbac/scope';
 import { branchAllowed, can } from '../rbac/service';
 import { contractPdf } from './pdf';
+import { notifyContract } from '../zalo/service';
 import { addEvent, contractToApi, isPtCategory, lastPaymentDates, lastPaymentMethods, lockContract, syncMemberStatus, type Tx } from './service';
 
 export const contractsRouter = Router();
@@ -317,6 +318,7 @@ contractsRouter.post('/:id/activate', authorize('contracts.activate'), async (re
   });
   await audit(userId, 'contract.activated', { contract_id: cur.id, code: cur.code, allow_debt: b.allow_debt }, req.ip, cur.id);
   res.json({ data: contractToApi(c) });
+  void notifyContract(cur.id);
 });
 
 contractsRouter.post('/:id/renew', authorize('contracts.create'), async (req, res) => {

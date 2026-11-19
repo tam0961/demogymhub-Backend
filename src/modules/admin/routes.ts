@@ -76,6 +76,7 @@ adminRouter.get('/users', authenticate, authorize('roles.read'), async (req, res
       id: u.id,
       email: u.email,
       name: u.name,
+      employee_no: u.employeeNo,
       status: u.status,
       last_login_at: u.lastLoginAt,
       created_at: u.createdAt,

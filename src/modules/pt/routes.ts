@@ -12,6 +12,7 @@ import { branchAllowed, can } from '../rbac/service';
 import { classesRouter } from './classes';
 import { assertTrainer, lockKey, ownOnly, requireBotKey, syncZaloShifts } from './shared';
 import { fmtDM, lastWord, parseShiftMessage } from './zalo-shift';
+import { notifyPtDone } from '../zalo/service';
 
 export const ptBotRouter = Router();
 export const ptRouter = Router();
@@ -217,6 +218,7 @@ ptRouter.post('/sessions/:id/complete', authorize('pt_sessions.complete'), async
   });
   await audit(req.auth!.userId, 'pt_session.completed', { after: toApi(done) }, req.ip, s.id);
   res.json({ data: toApi(done) });
+  void notifyPtDone(s.id);
 });
 
 async function deduct(tx: Tx, s: PtSession, by: string, type: string) {
