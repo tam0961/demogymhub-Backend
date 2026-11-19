@@ -73,3 +73,36 @@ marketingRouter.put('/metrics', authorize('system.manage_settings'), async (req,
   await audit(req.auth!.userId, 'marketing.metrics_saved', { month: b.month, channel: b.channel }, req.ip);
   res.json({ data: b });
 });
+
+const ADS_KEY = 'marketing.ads';
+const ADS_PLATFORMS = ['facebook', 'google_ads', 'maps'] as const;
+type AdsPlatform = (typeof ADS_PLATFORMS)[number];
+type AdsStored = Record<AdsPlatform, { account_id: string; secret: string }>;
+const emptyAds = (): AdsStored => ({ facebook: { account_id: '', secret: '' }, google_ads: { account_id: '', secret: '' }, maps: { account_id: '', secret: '' } });
+
+async function getAds(): Promise<AdsStored> {
+  const row = await prisma.setting.findUnique({ where: { key: ADS_KEY } });
+  const v = (row?.value ?? {}) as Partial<AdsStored>;
+  const base = emptyAds();
+  for (const p of ADS_PLATFORMS) base[p] = { account_id: v[p]?.account_id ?? '', secret: v[p]?.secret ?? '' };
+  return base;
+}
+const publicAds = (a: AdsStored) => Object.fromEntries(ADS_PLATFORMS.map((p) => [p, { account_id: a[p].account_id, has_token: !!a[p].secret }]));
+
+const adsPut = z.object({
+  platform: z.enum(ADS_PLATFORMS),
+  account_id: z.string().trim().max(100),
+  token: z.string().trim().max(2000).optional(),
+});
+
+marketingRouter.get('/ads', authorize('reports.view'), async (_req, res) => {
+  res.json({ data: publicAds(await getAds()) });
+});
+marketingRouter.put('/ads', authorize('system.manage_settings'), async (req, res) => {
+  const b = adsPut.parse(req.body);
+  const ads = await getAds();
+  ads[b.platform] = { account_id: b.account_id, secret: b.token ? b.token : ads[b.platform].secret };
+  await prisma.setting.upsert({ where: { key: ADS_KEY }, create: { key: ADS_KEY, value: ads }, update: { value: ads } });
+  await audit(req.auth!.userId, 'marketing.ads_saved', { platform: b.platform, token_changed: !!b.token }, req.ip);
+  res.json({ data: publicAds(ads) });
+});
