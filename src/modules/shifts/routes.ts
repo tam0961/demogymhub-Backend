@@ -59,7 +59,7 @@ shiftsRouter.post('/:id/close', authorize('shifts.close'), async (req, res) => {
       _sum: { amount: true },
       _count: true,
     });
-    const byMethod = { cash: 0, transfer: 0, vietqr: 0, ewallet: 0 };
+    const byMethod = { cash: 0, transfer: 0, vietqr: 0, ewallet: 0, card: 0 };
     let count = 0;
     for (const g of inShift) {
       byMethod[g.method] = g._sum.amount ?? 0;

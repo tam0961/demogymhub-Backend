@@ -11,8 +11,8 @@ export const reportsRouter = Router();
 reportsRouter.use(authenticate);
 
 const q = z.object({ branch_id: z.string().uuid().optional(), date: z.string().regex(DATE_RE).optional() });
-const METHODS = ['cash', 'transfer', 'vietqr', 'ewallet'] as const;
-const zeroByMethod = () => ({ cash: 0, transfer: 0, vietqr: 0, ewallet: 0 });
+const METHODS = ['cash', 'transfer', 'vietqr', 'ewallet', 'card'] as const;
+const zeroByMethod = () => ({ cash: 0, transfer: 0, vietqr: 0, ewallet: 0, card: 0 });
 
 reportsRouter.get('/dashboard', authorize('reports.view'), async (req, res) => {
   const p = q.parse(req.query);

@@ -86,7 +86,7 @@ paymentsRouter.use(authenticate);
 
 const createSchema = z.object({
   contract_id: uuid,
-  method: z.enum(['cash', 'transfer', 'vietqr', 'ewallet']),
+  method: z.enum(['cash', 'transfer', 'vietqr', 'ewallet', 'card']),
   amount: z.number().int().positive(),
   ref: z.string().trim().regex(/^[A-Za-z0-9_-]{6,64}$/, 'ref must be 6-64 chars of A-Z a-z 0-9 _ -').optional(),
   note: z.string().trim().max(500).nullish(),
@@ -95,7 +95,7 @@ const listSchema = z.object({
   contract_id: uuid.optional(),
   shift_id: uuid.optional(),
   status: z.enum(['pending', 'confirmed', 'failed', 'refunded']).optional(),
-  method: z.enum(['cash', 'transfer', 'vietqr', 'ewallet']).optional(),
+  method: z.enum(['cash', 'transfer', 'vietqr', 'ewallet', 'card']).optional(),
   date: z.string().regex(DATE_RE).optional(),
   branch_id: uuid.optional(),
   page: z.coerce.number().int().min(1).default(1),

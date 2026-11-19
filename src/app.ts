@@ -15,6 +15,7 @@ import { adminRouter } from './modules/admin/routes';
 import { canCheckin } from './modules/checkins/guard';
 import { checkinsRouter } from './modules/checkins/routes';
 import { contractsRouter } from './modules/contracts/routes';
+import { contractTicketsRouter, ticketsRouter } from './modules/contracts/tickets';
 import { paymentsRouter } from './modules/payments/routes';
 import { publicRouter } from './modules/pt/public';
 import { ipadPublicRouter, ipadRouter } from './modules/ipad/routes';
@@ -81,6 +82,8 @@ export function createApp() {
   app.use('/api/members', membersRouter);
   app.use('/api/packages', packagesRouter);
   app.use('/api/contracts', contractsRouter);
+  app.use('/api/contracts', contractTicketsRouter);
+  app.use('/api/tickets', ticketsRouter);
   app.use('/api/payments', paymentsRouter);
   app.use('/api/shifts', shiftsRouter);
   app.use('/api/checkins', checkinsRouter);

@@ -47,6 +47,7 @@ enum PaymentMethod {
   transfer
   vietqr
   ewallet
+  card
 }
 
 enum AuthTokenKind {
@@ -311,6 +312,7 @@ model Contract {
   bundled    Contract[]          @relation("Bundle")
   ptSessions PtSession[]
   groupRegs  GroupRegistration[]
+  tickets    ContractTicket[]
 
   @@index([memberId])
   @@index([branchId, status])
@@ -676,4 +678,24 @@ model FaceJob {
   @@index([deviceId, status])
   @@index([memberId])
   @@map("face_jobs")
+}
+
+model ContractTicket {
+  id          String    @id @default(uuid()) @db.Uuid
+  contractId  String    @map("contract_id") @db.Uuid
+  type        String
+  status      String
+  fee         Int
+  payload     Json      @default("{}")
+  requestedBy String?   @map("requested_by") @db.Uuid
+  decidedBy   String?   @map("decided_by") @db.Uuid
+  decidedAt   DateTime? @map("decided_at") @db.Timestamptz
+  reason      String?
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  contract Contract @relation(fields: [contractId], references: [id])
+
+  @@index([contractId])
+  @@index([status, createdAt])
+  @@map("contract_tickets")
 }

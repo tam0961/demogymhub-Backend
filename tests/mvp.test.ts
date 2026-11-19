@@ -710,7 +710,7 @@ describe('shifts, daily closing and dashboard (isolated branch)', () => {
 
     const close = await request(app).post(`/api/shifts/${shiftId}/close`).set(tok(rt, iso)).send({ counted_cash: 175000 });
     expect(close.status).toBe(200);
-    expect(close.body.data.totals_by_method).toEqual({ cash: sum('cash'), transfer: sum('transfer'), vietqr: sum('vietqr'), ewallet: sum('ewallet') });
+    expect(close.body.data.totals_by_method).toEqual({ cash: sum('cash'), transfer: sum('transfer'), vietqr: sum('vietqr'), ewallet: sum('ewallet'), card: 0 });
     expect(close.body.data).toMatchObject({ expected_cash: 100000 + 75000, difference: 0, counted_cash: 175000 });
     expect(close.body.data.totals_by_method).toMatchObject({ cash: 75000, transfer: 20000, vietqr: 0 });
     expect((await request(app).get('/api/shifts/current').set(tok(rt, iso))).body.data).toBeNull();
@@ -751,7 +751,7 @@ describe('shifts, daily closing and dashboard (isolated branch)', () => {
     expect(dash.status).toBe(200);
     const x = dash.body.data;
     expect(x.revenue_today).toBe(65000);
-    expect(x.revenue_by_method).toEqual({ cash: 45000, transfer: 20000, vietqr: 0, ewallet: 0 });
+    expect(x.revenue_by_method).toEqual({ cash: 45000, transfer: 20000, vietqr: 0, ewallet: 0, card: 0 });
     expect(x.revenue_7d).toHaveLength(7);
     expect(x.revenue_7d[6]).toEqual({ date: todayVN(), amount: 65000 });
     expect(x.new_contracts_today).toBe(2);
