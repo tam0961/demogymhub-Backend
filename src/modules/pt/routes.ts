@@ -2,7 +2,7 @@ import { Router, type Request } from 'express';
 import { z } from 'zod';
 import type { Member, Prisma, PtSession, User } from '@prisma/client';
 import { audit } from '../../lib/audit';
-import { DATE_RE, dateOnly, dayRange, todayVN } from '../../lib/dates';
+import { DATE_RE, dateOnly, dayRange, todayVN, vnDayOf } from '../../lib/dates';
 import { badRequest, conflict, forbidden, notFound } from '../../lib/errors';
 import { prisma } from '../../lib/prisma';
 import { authenticate, authorize } from '../../middlewares/auth';
@@ -11,7 +11,7 @@ import { branchFilter, writeBranch } from '../rbac/scope';
 import { branchAllowed, can } from '../rbac/service';
 import { classesRouter } from './classes';
 import { assertTrainer, lockKey, ownOnly, requireBotKey, syncZaloShifts } from './shared';
-import { fmtDM, lastWord, parseShiftMessage } from './zalo-shift';
+import { applyShiftMessage } from './shift-message';
 import { notifyPtDone } from '../zalo/service';
 
 export const ptBotRouter = Router();
@@ -202,6 +202,7 @@ ptRouter.post('/sessions/:id/complete', authorize('pt_sessions.complete'), async
   const s = await loadSession(req);
   if (ownOnly(req) && s.trainerId !== req.auth!.userId) throw forbidden('Not your session');
   if (!s.memberId) throw conflict('NO_MEMBER', 'Assign a member before completing the session');
+  if (vnDayOf(s.startAt) > todayVN()) throw conflict('FUTURE_SESSION', 'Chỉ hoàn thành được buổi dạy trong ngày, không hoàn thành buổi ở tương lai');
   const elig = await ptEligibility(s.memberId);
   if (s.contractId && !elig.eligible) throw conflict('NOT_ELIGIBLE', 'Member package or PT package is no longer usable');
   const done = await prisma.$transaction(async (tx) => {
@@ -321,52 +322,5 @@ const messageSchema = z.object({
 ptBotRouter.post('/message', async (req, res) => {
   requireBotKey(req);
   const b = messageSchema.parse(req.body);
-  const sentAt = b.sent_at ? new Date(b.sent_at) : new Date();
-  const parsed = parseShiftMessage(b.text, sentAt);
-  if (!parsed) {
-    res.json({ data: { handled: false, reply: null } });
-    return;
-  }
-  const today = todayVN(new Date());
-  if (parsed.date < today) {
-    res.json({ data: { handled: true, date: parsed.date, reply: `Bỏ qua ca ngày ${fmtDM(parsed.date)} vì đã qua.`, results: [], errors: [] } });
-    return;
-  }
-  const trainers = await prisma.user.findMany({
-    where: { status: 'active', userRoles: { some: { role: { key: 'trainer' }, OR: [{ branchId: b.branch_id }, { branchId: null }] } } },
-    select: { id: true, name: true },
-  });
-  const results: { trainer: string; added: number; removed: number; reopened: number; off: boolean }[] = [];
-  const errors: string[] = [];
-  const reported = new Set<string>();
-  for (const entry of parsed.entries) {
-    const found = trainers.filter((t) => lastWord(t.name) === lastWord(entry.name));
-    if (found.length === 0) {
-      errors.push(`Chưa có PT "${entry.name}" trong GymHub.`);
-      continue;
-    }
-    if (found.length > 1) {
-      errors.push(`Có nhiều PT trùng tên "${entry.name}".`);
-      continue;
-    }
-    const t = found[0];
-    const r = await syncZaloShifts(b.branch_id, t.id, parsed.date, entry.off ? [] : entry.hours);
-    const offKey = { trainerId: t.id, branchId: b.branch_id, date: dateOnly(parsed.date) };
-    if (entry.off) await prisma.ptDayOff.upsert({ where: { trainerId_branchId_date: offKey }, create: offKey, update: {} });
-    else await prisma.ptDayOff.deleteMany({ where: offKey });
-    reported.add(t.id);
-    results.push({ trainer: t.name, off: entry.off, ...r });
-  }
-  const day = dayRange(parsed.date);
-  const withShifts = await prisma.ptSession.findMany({
-    where: { branchId: b.branch_id, startAt: { gte: day.gte, lt: day.lt }, status: { not: 'cancelled' } },
-    select: { trainerId: true },
-    distinct: ['trainerId'],
-  });
-  const have = new Set([...reported, ...withShifts.map((s) => s.trainerId)]);
-  const missing = trainers.filter((t) => !have.has(t.id)).map((t) => t.name);
-  const head = `Đã ghi nhận ca ngày ${fmtDM(parsed.date)}`;
-  const tail = missing.length ? `Còn thiếu: ${missing.join(', ')}.` : `Đã đủ cho ${trainers.length} PT.`;
-  const reply = [results.length ? `${head}. ${tail}` : null, ...errors].filter(Boolean).join('\n') || null;
-  res.json({ data: { handled: true, date: parsed.date, reply, results, errors, missing } });
+  res.json({ data: await applyShiftMessage(b.branch_id, b.text, b.sent_at ? new Date(b.sent_at) : new Date()) });
 });

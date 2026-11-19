@@ -18,7 +18,7 @@ const addDays = (iso: string, n: number) => new Date(new Date(`${iso}T12:00:00Z`
 export const lastWord = (name: string) => fold(name.replace(/[^\p{L}\s]/gu, ' ')).split(' ').filter(Boolean).pop() ?? '';
 export const fmtDM = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
 
-function cleanName(raw: string) {
+export function cleanName(raw: string) {
   const t = raw
     .replace(/[^\p{L}\s.]/gu, ' ')
     .replace(/\s+/g, ' ')

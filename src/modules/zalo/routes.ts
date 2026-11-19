@@ -4,6 +4,9 @@ import { audit } from '../../lib/audit';
 import { badRequest } from '../../lib/errors';
 import { prisma } from '../../lib/prisma';
 import { authenticate, authorize } from '../../middlewares/auth';
+import { getBotCfg, getBotState, publicBotCfg, saveBotCfg, parseWindows } from '../zalobot/config';
+import { sendText, zaloApi } from '../zalobot/service';
+import { branchAllowed } from '../rbac/service';
 import { getZns, publicZns, saveZns, sendZns, sendExpiryReminders, SAMPLE_VARS, ZNS_EVENTS } from './service';
 
 export const zaloRouter = Router();
@@ -67,4 +70,45 @@ zaloRouter.get('/logs', async (_req, res) => {
   res.json({
     data: rows.map((r) => ({ id: r.id, event: r.event, phone: r.phone, status: r.status, error: r.error, created_at: r.createdAt.toISOString() })),
   });
+});
+
+const botSchema = z.object({
+  enabled: z.boolean(),
+  token: z.string().trim().max(300).optional(),
+  bot_name: z.string().trim().min(1).max(60),
+  pt_group: z.string().trim().max(100),
+  branch_id: z.union([z.string().uuid(), z.literal('')]),
+  group_trainer: z.string().trim().max(60),
+  group_windows: z.string().trim().max(100),
+});
+
+zaloRouter.get('/bot/config', async (_req, res) => {
+  res.json({ data: { ...publicBotCfg(await getBotCfg()), state: await getBotState() } });
+});
+
+zaloRouter.put('/bot/config', async (req, res) => {
+  const b = botSchema.parse(req.body);
+  if (b.branch_id && !branchAllowed(req.access!, b.branch_id)) throw badRequest('BRANCH_INVALID', 'Branch not permitted');
+  if (b.group_windows && parseWindows(b.group_windows).length === 0) throw badRequest('WINDOWS_INVALID', 'Use the form 06:30-07:45, 20:00-21:15');
+  const cfg = await getBotCfg();
+  if (b.token) cfg.token = b.token;
+  if (b.enabled && (!cfg.token || !b.pt_group || !b.branch_id)) throw badRequest('BOT_INCOMPLETE', 'Token, PT group and branch are required to turn the bot on');
+  Object.assign(cfg, { enabled: b.enabled, botName: b.bot_name, ptGroup: b.pt_group, branchId: b.branch_id, groupTrainer: b.group_trainer, groupWindows: b.group_windows });
+  await saveBotCfg(cfg);
+  await audit(req.auth!.userId, 'zalo_bot.config_updated', { enabled: cfg.enabled, pt_group: cfg.ptGroup, branch_id: cfg.branchId }, req.ip);
+  res.json({ data: { ...publicBotCfg(cfg), state: await getBotState() } });
+});
+
+zaloRouter.post('/bot/check', async (_req, res) => {
+  const cfg = await getBotCfg();
+  if (!cfg.token) throw badRequest('TOKEN_REQUIRED', 'Enter the bot token first');
+  const r = await zaloApi(cfg.token, 'getMe');
+  res.json({ data: { ok: !!r?.ok, message: r ? (r.ok ? 'ok' : String(r.description ?? r.error_code ?? 'error')) : 'Không kết nối được Zalo' } });
+});
+
+zaloRouter.post('/bot/send-test', async (_req, res) => {
+  const cfg = await getBotCfg();
+  if (!cfg.token || !cfg.ptGroup) throw badRequest('BOT_INCOMPLETE', 'Token and PT group are required');
+  const r = await sendText(cfg, cfg.ptGroup, 'Bot đã kết nối với DemoGym. Tin thử, anh chị có thể bỏ qua ạ.');
+  res.json({ data: { ok: !!r?.ok, message: r ? (r.ok ? 'ok' : String(r.description ?? r.error_code ?? 'error')) : 'Không kết nối được Zalo' } });
 });

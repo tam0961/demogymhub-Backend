@@ -1,0 +1,5 @@
+CREATE TABLE "bot_sent" (
+    "key" TEXT NOT NULL,
+    "at" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "bot_sent_pkey" PRIMARY KEY ("key")
+);

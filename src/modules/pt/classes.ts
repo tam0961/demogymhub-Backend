@@ -425,6 +425,7 @@ classesRouter.post('/:id/complete', authorize('pt_sessions.complete'), async (re
   const cls = await loadClass(req);
   if (ownOnly(req) && cls.trainer?.id !== req.auth!.userId) throw forbidden('Not your class');
   if (!cls.trainer) throw conflict('NO_TRAINER', 'Assign a trainer before completing the class');
+  if (vnDayOf(cls.startAt) > todayVN()) throw conflict('FUTURE_CLASS', 'Chỉ hoàn thành được buổi dạy trong ngày, không hoàn thành buổi ở tương lai');
   const out = await prisma.$transaction(async (tx) => {
     await lockKey(tx, 'class:' + cls.id);
     const flip = await tx.groupClass.updateMany({ where: { id: cls.id, status: 'scheduled' }, data: { status: 'completed', completedAt: new Date() } });

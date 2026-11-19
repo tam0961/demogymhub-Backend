@@ -57,6 +57,11 @@ describe('pt sessions', () => {
     const denied = await request(app).post(`/api/pt/sessions/${a.body.data.id}/cancel`).set(h(trainerTok));
     expect(denied.status).toBe(403);
 
+    const future = await request(app).post(`/api/pt/sessions/${a.body.data.id}/complete`).set(h(trainerTok));
+    expect(future.status).toBe(409);
+    expect(future.body.error.code).toBe('FUTURE_SESSION');
+    const now = new Date();
+    await prisma.ptSession.update({ where: { id: a.body.data.id }, data: { startAt: now, endAt: new Date(now.getTime() + 3600000) } });
     const done = await request(app).post(`/api/pt/sessions/${a.body.data.id}/complete`).set(h(trainerTok));
     expect(done.status).toBe(200);
     expect((await request(app).post(`/api/pt/sessions/${a.body.data.id}/complete`).set(h(trainerTok))).status).toBe(409);
@@ -103,6 +108,8 @@ describe('group classes', () => {
     const reg = await request(app).post(`/api/pt/classes/${cls}/registrations`).set(h(reception)).send({ member_id: memberId });
     expect(reg.status).toBe(201);
     const before = await sessionsLeft();
+    expect((await request(app).post(`/api/pt/classes/${cls}/complete`).set(h(trainerTok))).status).toBe(409);
+    await prisma.groupClass.update({ where: { id: cls }, data: { startAt: new Date() } });
     expect((await request(app).post(`/api/pt/classes/${cls}/complete`).set(h(trainerTok))).status).toBe(200);
     expect(await sessionsLeft()).toBe(before);
     expect((await request(app).post(`/api/pt/classes/registrations/${reg.body.data.id}/cancel`).set(h(reception))).status).toBe(409);

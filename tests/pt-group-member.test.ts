@@ -50,6 +50,7 @@ describe('PT group package that is a member package', () => {
     expect((await request(app).post(`/api/pt/classes/registrations/${reg.body.data.id}/cancel`).set(h(reception))).status).toBe(409);
     const back = await request(app).post(`/api/pt/classes/registrations/${reg.body.data.id}/attendance`).set(h(trainerTok)).send({ status: 'attended' });
     expect(back.body.data.status).toBe('attended');
+    await prisma.groupClass.update({ where: { id: cls }, data: { startAt: new Date() } });
     expect((await request(app).post(`/api/pt/classes/${cls}/complete`).set(h(trainerTok))).status).toBe(200);
   });
 
