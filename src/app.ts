@@ -27,6 +27,7 @@ import { zaloRouter } from './modules/zalo/routes';
 import { marketingRouter, sheetsRouter } from './modules/marketing/routes';
 import { printRouter } from './modules/printing/routes';
 import { attendancePublicRouter, attendanceRouter } from './modules/attendance/routes';
+import { payrollRouter } from './modules/payroll/routes';
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -100,6 +101,7 @@ export function createApp() {
   app.use('/api/settings/sheets', sheetsRouter);
   app.use('/api/settings/print-templates', printRouter);
   app.use('/api/attendance', attendanceRouter);
+  app.use('/api/payroll', payrollRouter);
   app.use('/api', adminRouter);
 
   app.use(notFoundHandler);

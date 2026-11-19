@@ -99,6 +99,8 @@ model User {
   ptDayOffs       PtDayOff[]     @relation("PtDayOffTrainer")
   employeeNo      String?        @unique @map("employee_no")
   punches         StaffPunch[]
+  payrollProfile  PayrollProfile?
+  payrollAdjustments PayrollAdjustment[]
 
   @@map("users")
 }
@@ -698,4 +700,46 @@ model ContractTicket {
   @@index([contractId])
   @@index([status, createdAt])
   @@map("contract_tickets")
+}
+
+model PayrollProfile {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String   @unique @map("user_id") @db.Uuid
+  position     String   @default("other")
+  baseSalary   Int      @default(0) @map("base_salary")
+  hasInsurance Boolean  @default(false) @map("has_insurance")
+  taxMode      String   @default("none") @map("tax_mode")
+  dependents   Int      @default(0)
+  active       Boolean  @default(true)
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("payroll_profiles")
+}
+
+model PayrollAdjustment {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  month      String
+  penalty    Int      @default(0)
+  adjustment Int      @default(0)
+  note       String?
+  updatedAt  DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, month])
+  @@map("payroll_adjustments")
+}
+
+model PayrollPeriod {
+  id       String    @id @default(uuid()) @db.Uuid
+  month    String    @unique
+  status   String    @default("open")
+  snapshot Json?
+  closedBy String?   @map("closed_by") @db.Uuid
+  closedAt DateTime? @map("closed_at") @db.Timestamptz
+
+  @@map("payroll_periods")
 }
