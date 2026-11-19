@@ -23,6 +23,8 @@ import { reportsRouter } from './modules/reports/routes';
 import { leadsRouter } from './modules/leads/routes';
 import { shiftsRouter } from './modules/shifts/routes';
 import { zaloRouter } from './modules/zalo/routes';
+import { marketingRouter, sheetsRouter } from './modules/marketing/routes';
+import { printRouter } from './modules/printing/routes';
 import { attendancePublicRouter, attendanceRouter } from './modules/attendance/routes';
 
 declare global {
@@ -91,6 +93,9 @@ export function createApp() {
   app.use('/api/reports', reportsRouter);
   app.use('/api/leads', leadsRouter);
   app.use('/api/zalo', zaloRouter);
+  app.use('/api/marketing', marketingRouter);
+  app.use('/api/settings/sheets', sheetsRouter);
+  app.use('/api/settings/print-templates', printRouter);
   app.use('/api/attendance', attendanceRouter);
   app.use('/api', adminRouter);
 

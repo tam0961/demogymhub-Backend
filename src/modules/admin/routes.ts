@@ -7,7 +7,7 @@ import { badRequest, conflict, forbidden, notFound } from '../../lib/errors';
 import { hashPassword, randomToken } from '../../lib/crypto';
 import { prisma } from '../../lib/prisma';
 import { authenticate, authorize } from '../../middlewares/auth';
-import { ROLES } from '../rbac/permissions';
+import { RECEPTIONIST_TOGGLES, ROLES } from '../rbac/permissions';
 import { assignRole, invalidateAccess } from '../rbac/service';
 
 export const adminRouter = Router();
@@ -51,16 +51,36 @@ adminRouter.get('/roles', authenticate, authorize('roles.read'), async (_req, re
   });
 });
 
+const LOGIN_ROLES = ['super_admin', 'owner', 'receptionist'];
+
+adminRouter.put('/roles/receptionist/permissions', authenticate, authorize('roles.assign'), async (req, res) => {
+  if (!req.access!.roles.some((r) => r === 'super_admin' || r === 'owner')) throw forbidden('Only the owner can change receptionist permissions');
+  const b = z.object({ permissions: z.array(z.string()).max(50) }).parse(req.body);
+  const bad = b.permissions.filter((k) => !RECEPTIONIST_TOGGLES.includes(k));
+  if (bad.length) throw badRequest('PERMISSION_NOT_GRANTABLE', `Cannot change: ${bad.join(', ')}`);
+  const role = await prisma.role.findUniqueOrThrow({ where: { key: 'receptionist' } });
+  const keys = await prisma.permission.findMany({ where: { key: { in: b.permissions } } });
+  await prisma.$transaction([
+    prisma.rolePermission.deleteMany({ where: { roleId: role.id, permission: { key: { in: RECEPTIONIST_TOGGLES } } } }),
+    prisma.rolePermission.createMany({ data: keys.map((p) => ({ roleId: role.id, permissionId: p.id })) }),
+  ]);
+  const users = await prisma.userRole.findMany({ where: { roleId: role.id }, select: { userId: true } });
+  await Promise.all([...new Set(users.map((u) => u.userId))].map((id) => invalidateAccess(id)));
+  await audit(req.auth!.userId, 'role.permissions_updated', { role: 'receptionist', granted: b.permissions }, req.ip);
+  res.json({ data: { permissions: keys.map((p) => p.key).sort() } });
+});
+
 adminRouter.get('/permissions', authenticate, authorize('roles.read'), async (_req, res) => {
   const rows = await prisma.permission.findMany({ orderBy: { key: 'asc' } });
   res.json({ data: rows.map((p) => ({ id: p.id, key: p.key, resource: p.resource, action: p.action })) });
 });
 
 adminRouter.get('/users', authenticate, authorize('roles.read'), async (req, res) => {
-  const q = z.object({ q: z.string().trim().max(100).optional(), ...page }).parse(req.query);
-  const where: Prisma.UserWhereInput = q.q
-    ? { OR: [{ email: { contains: q.q, mode: 'insensitive' } }, { name: { contains: q.q, mode: 'insensitive' } }] }
-    : {};
+  const q = z.object({ q: z.string().trim().max(100).optional(), scope: z.enum(['login']).optional(), ...page }).parse(req.query);
+  const where: Prisma.UserWhereInput = {
+    ...(q.q ? { OR: [{ email: { contains: q.q, mode: 'insensitive' } }, { name: { contains: q.q, mode: 'insensitive' } }] } : {}),
+    ...(q.scope === 'login' ? { userRoles: { some: { role: { key: { in: LOGIN_ROLES } } } } } : {}),
+  };
   const [total, rows] = await Promise.all([
     prisma.user.count({ where }),
     prisma.user.findMany({

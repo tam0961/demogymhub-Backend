@@ -1,7 +1,7 @@
 import type { PrismaClient } from '@prisma/client';
 import { config } from './config';
 import { hashPassword } from './lib/crypto';
-import { PERMISSIONS, ROLES } from './modules/rbac/permissions';
+import { PERMISSIONS, RECEPTIONIST_TOGGLES, ROLES } from './modules/rbac/permissions';
 
 const BRANCHES = [
   { code: 'q2', name: 'Chi nhánh Quận 2' },
@@ -32,7 +32,10 @@ export async function seedRbac(prisma: PrismaClient) {
       update: { name: r.name },
       create: { key: r.key, name: r.name, isSystem: true },
     });
-    const perms = await prisma.permission.findMany({ where: { key: { in: r.permissions } } });
+    const keep = r.key === 'receptionist'
+      ? (await prisma.rolePermission.findMany({ where: { roleId: role.id, permission: { key: { in: RECEPTIONIST_TOGGLES } } }, include: { permission: true } })).map((x) => x.permission.key)
+      : [];
+    const perms = await prisma.permission.findMany({ where: { key: { in: [...r.permissions, ...keep] } } });
     await prisma.rolePermission.deleteMany({ where: { roleId: role.id } });
     await prisma.rolePermission.createMany({ data: perms.map((p) => ({ roleId: role.id, permissionId: p.id })) });
   }

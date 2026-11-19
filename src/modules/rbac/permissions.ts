@@ -147,3 +147,15 @@ export const ROLES: RoleDef[] = [
     permissions: ['me.read', 'bookings.create', 'payments.pay_own', 'packages.read'],
   },
 ];
+
+export const RECEPTIONIST_TOGGLES = [
+  'contracts.freeze',
+  'contracts.approve',
+  'contracts.cancel',
+  'pt_sessions.complete',
+  'payments.refund_request',
+  'payments.confirm',
+  'packages.create',
+  'packages.update',
+  'reports.view',
+];
