@@ -115,7 +115,11 @@ describe('attendance (hikvision push)', () => {
     const staff = await makeUser(`late${uniq()}@za.test`, 'trainer', null);
     await request(app).put(`/api/attendance/staff/${staff.id}`).set(h('owner')).send({ employee_no: emp });
     expect(await prisma.staffPunch.count({ where: { employeeNo: emp, userId: staff.id } })).toBe(1);
-    const deny = await request(app).get('/api/attendance/devices').set(h('receptionist'));
+    expect((await request(app).get('/api/attendance/devices').set(h('receptionist'))).status).toBe(200);
+    const addDev = await request(app).post('/api/attendance/devices').set(h('receptionist')).send({ name: 'Le tan dev' });
+    expect(addDev.status).toBe(201);
+    expect(addDev.body.data.branch_id).toBe(A);
+    const deny = await request(app).put(`/api/attendance/staff/${staff.id}`).set(h('receptionist')).send({ employee_no: `${emp}x` });
     expect(deny.status).toBe(403);
   });
 });

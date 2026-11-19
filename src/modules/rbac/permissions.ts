@@ -18,6 +18,7 @@ export const PERMISSIONS: string[] = [
   ...expand('roles', ['read', 'assign']),
   ...expand('system', ['view_audit_log', 'manage_settings']),
   ...expand('attendance', ['read', 'manage']),
+  ...expand('devices', ['manage']),
   'me.read',
 ];
 
@@ -73,6 +74,7 @@ export const ROLES: RoleDef[] = [
       'system.manage_settings',
       'attendance.read',
       'attendance.manage',
+      'devices.manage',
       'me.read',
     ],
   },
@@ -87,6 +89,7 @@ export const ROLES: RoleDef[] = [
       ...expand('leads', CRUD),
       'reports.view',
       'attendance.read',
+      'devices.manage',
       'me.read',
     ],
   },
@@ -115,6 +118,7 @@ export const ROLES: RoleDef[] = [
       'pt_sessions.cancel',
       'shifts.open',
       'shifts.close',
+      'devices.manage',
       'me.read',
     ],
   },

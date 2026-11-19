@@ -265,7 +265,7 @@ attendanceRouter.get('/face-jobs', authorize('members.read'), async (req, res) =
   res.json({ data: rows.map((r) => ({ id: r.id, device_name: name.get(r.deviceId) ?? '', status: r.status, message: r.message, created_at: r.createdAt.toISOString(), finished_at: r.finishedAt?.toISOString() ?? null })) });
 });
 
-attendanceRouter.get('/devices', authorize('attendance.manage'), async (req, res) => {
+attendanceRouter.get('/devices', authorize('devices.manage'), async (req, res) => {
   const rows = await prisma.staffDevice.findMany({ where: branchFilter(req), orderBy: { createdAt: 'asc' }, include: { branch: { select: { name: true } } } });
   res.json({
     data: rows.map((d) => ({
@@ -279,7 +279,7 @@ attendanceRouter.get('/devices', authorize('attendance.manage'), async (req, res
   });
 });
 
-attendanceRouter.post('/devices', authorize('attendance.manage'), async (req, res) => {
+attendanceRouter.post('/devices', authorize('devices.manage'), async (req, res) => {
   const b = z.object({ name: z.string().trim().min(1).max(60), branch_id: uuid.optional() }).parse(req.body);
   const branchId = writeBranch(req, b.branch_id);
   const d = await prisma.staffDevice.create({ data: { name: b.name, branchId, deviceKey: randomBytes(16).toString('hex') } });
@@ -287,7 +287,7 @@ attendanceRouter.post('/devices', authorize('attendance.manage'), async (req, re
   res.status(201).json({ data: { id: d.id, name: d.name, branch_id: d.branchId, device_key: d.deviceKey, last_seen_at: null } });
 });
 
-attendanceRouter.delete('/devices/:id', authorize('attendance.manage'), async (req, res) => {
+attendanceRouter.delete('/devices/:id', authorize('devices.manage'), async (req, res) => {
   const id = uuid.parse(req.params.id);
   const d = await prisma.staffDevice.findUnique({ where: { id } });
   if (!d || !branchAllowed(req.access!, d.branchId)) throw notFound('Device not found');
