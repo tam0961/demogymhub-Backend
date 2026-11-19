@@ -2,6 +2,7 @@ import request from 'supertest';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { prisma } from '../src/lib/prisma';
 import { app, makeUser, tokenFor } from './helpers';
+import { deviceEmpNo } from '../src/modules/attendance/routes';
 
 const sfx = Date.now().toString(36);
 let A: string;
@@ -78,7 +79,7 @@ describe('face enrollment queue', () => {
     const claim = await request(app).get(`/api/public/attendance/jobs/${key}`);
     expect(claim.status).toBe(200);
     expect(claim.body.data).toHaveLength(1);
-    expect(claim.body.data[0].employee_no).toBe(`FACE${sfx}`);
+    expect(claim.body.data[0].employee_no).toBe(deviceEmpNo(`HV${sfx}`, `FACE${sfx}`));
     expect(Buffer.from(claim.body.data[0].photo, 'base64').toString()).toBe('jpegbytes');
     expect((await request(app).get(`/api/public/attendance/jobs/${key}`)).body.data).toHaveLength(0);
 
@@ -108,3 +109,18 @@ describe('pull face photos from the device', () => {
   });
 });
 
+
+describe('device employee numbers for DemoGym enrollments', () => {
+  it('maps member codes to the 8xxxxxx range and back', async () => {
+    expect(deviceEmpNo('HV1453', null)).toBe('8001453');
+    expect(deviceEmpNo('HV0389', 'X')).toBe('8000389');
+    expect(deviceEmpNo('ABC', 'FACE9')).toBe('FACE9');
+    const code = `HV${6000 + (Date.now() % 900)}`;
+    const m = await prisma.member.create({ data: { code, name: 'Khach Dai 8', phone: `04${sfx.replace(/\D/g, '').padEnd(8, '6').slice(0, 8)}`, branchId: A } });
+    const since = new Date(Date.now() - 1000).toISOString();
+    await scan(deviceEmpNo(code, null));
+    const r = await request(app).get('/api/attendance/scans').query({ since }).set(h());
+    const it0 = r.body.data.items.find((x: { employee_no: string }) => x.employee_no === deviceEmpNo(code, null));
+    expect(it0.member.id).toBe(m.id);
+  });
+});

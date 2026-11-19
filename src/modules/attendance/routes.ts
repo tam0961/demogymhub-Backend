@@ -78,10 +78,20 @@ export async function recordPunch(deviceId: string | null, p: RawPunch, source =
   return prisma.staffPunch.create({ data: { deviceId, userId: user?.id ?? null, employeeNo: p.employeeNo, punchedAt: p.at, source, createdBy } });
 }
 
+const ENROLL_RANGE = /^8\d{6}$/;
+
+/** Employee number written to the device for people enrolled from DemoGym: "8" + 6 digits of the member code (HV1453 -> 8001453), a range NextX does not use. */
+export function deviceEmpNo(code: string, faceId: string | null): string {
+  const digits = code.replace(/\D/g, '');
+  if (digits && digits.length <= 6) return `8${digits.padStart(6, '0')}`;
+  return faceId ?? code;
+}
+
 export async function findMemberForScan(emp: string) {
   const digits = emp.replace(/\D/g, '');
+  const enrolled = ENROLL_RANGE.test(emp) ? [{ code: { equals: `HV${String(parseInt(emp.slice(1), 10)).padStart(4, '0')}`, mode: 'insensitive' as const } }] : [];
   return prisma.member.findFirst({
-    where: { OR: [{ faceId: emp }, { code: { equals: emp, mode: 'insensitive' } }, ...(digits.length >= 8 ? [{ phone: digits }] : [])] },
+    where: { OR: [{ faceId: emp }, { code: { equals: emp, mode: 'insensitive' } }, ...enrolled, ...(digits.length >= 8 ? [{ phone: digits }] : [])] },
     select: { id: true },
   });
 }
@@ -150,7 +160,7 @@ attendancePublicRouter.get('/jobs/:key', async (req, res) => {
     if (!m) continue;
     out.push({
       id: j.id,
-      employee_no: m.faceId ?? m.code,
+      employee_no: deviceEmpNo(m.code, m.faceId),
       name: m.name,
       valid_to: last?.endDate ? last.endDate.toISOString().slice(0, 10) : null,
       photo: photo ? Buffer.from(photo.data).toString('base64') : null,
