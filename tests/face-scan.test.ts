@@ -145,3 +145,23 @@ describe('enrolling a member with a non-HV code', () => {
   });
 });
 
+describe('scan feed long poll', () => {
+  it('returns as soon as a scan arrives instead of waiting out the timeout', async () => {
+    const since = new Date().toISOString();
+    const started = Date.now();
+    const pending = request(app).get('/api/attendance/scans').query({ since, wait: 8 }).set(h());
+    await new Promise((r) => setTimeout(r, 400));
+    await scan(`LP-${sfx}`);
+    const r = await pending;
+    expect(r.status).toBe(200);
+    expect(Date.now() - started).toBeLessThan(5000);
+    expect(r.body.data.items.some((i: { employee_no: string }) => i.employee_no === `LP-${sfx}`)).toBe(true);
+  });
+
+  it('returns an empty list when nothing arrives within the wait', async () => {
+    const r = await request(app).get('/api/attendance/scans').query({ since: new Date().toISOString(), wait: 1 }).set(h());
+    expect(r.status).toBe(200);
+    expect(r.body.data.items).toEqual([]);
+  });
+});
+

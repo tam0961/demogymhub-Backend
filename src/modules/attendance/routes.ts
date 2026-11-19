@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { EventEmitter } from 'node:events';
 import express, { Router } from 'express';
 import { z } from 'zod';
 import type { Prisma } from '@prisma/client';
@@ -12,6 +13,9 @@ import { branchAllowed } from '../rbac/service';
 import { evaluateCheckin } from '../checkins/routes';
 
 const uuid = z.string().uuid();
+
+const scanBus = new EventEmitter();
+scanBus.setMaxListeners(500);
 
 function extractJson(text: string): unknown {
   const start = text.indexOf('{');
@@ -122,7 +126,9 @@ export async function routeScan(device: { id: string; branchId: string }, p: Raw
       reason = 'ERROR';
     }
   }
-  return prisma.faceEvent.create({ data: { deviceId: device.id, branchId: device.branchId, employeeNo: p.employeeNo, memberId: ref?.id ?? null, result, reason, checkinId, scannedAt: new Date() } });
+  const created = await prisma.faceEvent.create({ data: { deviceId: device.id, branchId: device.branchId, employeeNo: p.employeeNo, memberId: ref?.id ?? null, result, reason, checkinId, scannedAt: new Date() } });
+  scanBus.emit('scan');
+  return created;
 }
 
 export const attendancePublicRouter = Router();
@@ -220,10 +226,29 @@ export const attendanceRouter = Router();
 attendanceRouter.use(authenticate);
 
 attendanceRouter.get('/scans', authorize('checkins.read'), async (req, res) => {
-  const q = z.object({ since: z.string().datetime({ offset: true }).optional() }).parse(req.query);
-  const now = new Date();
+  const q = z.object({ since: z.string().datetime({ offset: true }).optional(), wait: z.coerce.number().int().min(0).max(25).optional() }).parse(req.query);
+  const bf = branchFilter(req);
+  let now = new Date();
   const since = q.since ? new Date(q.since) : new Date(now.getTime() - 20_000);
-  const rows = await prisma.faceEvent.findMany({ where: { ...branchFilter(req), scannedAt: { gt: since } }, orderBy: { scannedAt: 'asc' }, take: 5 });
+  const fetchRows = () => prisma.faceEvent.findMany({ where: { ...bf, scannedAt: { gt: since } }, orderBy: { scannedAt: 'asc' }, take: 5 });
+  let rows = await fetchRows();
+  if (!rows.length && q.wait) {
+    await new Promise<void>((resolve) => {
+      const done = () => {
+        clearTimeout(timer);
+        scanBus.off('scan', done);
+        req.off('close', done);
+        resolve();
+      };
+      const timer = setTimeout(done, q.wait! * 1000);
+      scanBus.on('scan', done);
+      req.on('close', done);
+    });
+    if (!req.destroyed) {
+      now = new Date();
+      rows = await fetchRows();
+    }
+  }
   const todayStr = vnDayOf(now);
   const items = [];
   for (const e of rows) {
