@@ -80,3 +80,18 @@ describe('face enrollment queue', () => {
   });
 });
 
+describe('pull face photos from the device', () => {
+  const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(200, 1)]).toString('base64');
+  it('saves a photo only for a matching member without one, never overwrites', async () => {
+    const code = `HVP${sfx}`;
+    const m = await prisma.member.create({ data: { code, name: 'Khach Anh', phone: `06${sfx.replace(/\D/g, '').padEnd(8, '5').slice(0, 8)}`, branchId: A } });
+    const url = `/api/public/attendance/facepush/${key}`;
+    expect((await request(app).post(url).send({ employee_no: 'ZZ-none', photo: jpeg })).body.data.result).toBe('no_match');
+    expect((await request(app).post(url).send({ employee_no: code })).body.data.result).toBe('no_photo');
+    expect((await request(app).post(url).send({ employee_no: code, photo: 'AAAA' })).body.data.result).toBe('bad_image');
+    expect((await request(app).post(url).send({ employee_no: code, photo: jpeg })).body.data.result).toBe('saved');
+    expect(await prisma.memberPhoto.count({ where: { memberId: m.id } })).toBe(1);
+    expect((await request(app).post(url).send({ employee_no: code, photo: jpeg })).body.data.result).toBe('has_photo');
+  });
+});
+

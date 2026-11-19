@@ -154,6 +154,41 @@ attendancePublicRouter.post('/jobs/:key/done', express.json(), async (req, res) 
   res.json({ status: 'ok' });
 });
 
+attendancePublicRouter.post('/facepush/:key', async (req, res) => {
+  const device = await prisma.staffDevice.findUnique({ where: { deviceKey: String(req.params.key) } });
+  if (!device) {
+    res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Unknown device' } });
+    return;
+  }
+  const b = z.object({ employee_no: z.string().trim().min(1).max(40), photo: z.string().max(280_000).optional() }).parse(req.body);
+  const m = await findMemberForScan(b.employee_no);
+  if (!m) {
+    res.json({ data: { result: 'no_match' } });
+    return;
+  }
+  const full = await prisma.member.findUnique({ where: { id: m.id }, select: { id: true, branchId: true } });
+  if (!full || full.branchId !== device.branchId) {
+    res.json({ data: { result: 'other_branch' } });
+    return;
+  }
+  if (!b.photo) {
+    res.json({ data: { result: 'no_photo' } });
+    return;
+  }
+  const has = await prisma.memberPhoto.findUnique({ where: { memberId: full.id }, select: { memberId: true } });
+  if (has) {
+    res.json({ data: { result: 'has_photo' } });
+    return;
+  }
+  const buf = Buffer.from(b.photo, 'base64');
+  if (buf.length < 100 || buf[0] !== 0xff || buf[1] !== 0xd8) {
+    res.json({ data: { result: 'bad_image' } });
+    return;
+  }
+  await prisma.memberPhoto.create({ data: { memberId: full.id, contentType: 'image/jpeg', data: buf } });
+  res.json({ data: { result: 'saved' } });
+});
+
 export const attendanceRouter = Router();
 attendanceRouter.use(authenticate);
 
