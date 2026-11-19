@@ -253,6 +253,8 @@ export function contractToApi(c: Full, extra: Extra = {}) {
     frozen_until: fmtDate(c.frozenUntil),
     renewed_from_id: c.renewedFromId,
     bundle_of_id: c.bundleOfId,
+    sale: c.saleUserId || c.saleName ? { id: c.saleUserId, name: c.saleName } : null,
+    pt: c.ptUserId || c.ptName ? { id: c.ptUserId, name: c.ptName } : null,
     note: c.note,
     created_at: c.createdAt,
     ...(c.member && { member: { id: c.member.id, code: c.member.code, name: c.member.name, phone: c.member.phone, email: c.member.email } }),

@@ -10,6 +10,7 @@ import { branchFilter } from '../rbac/scope';
 import { branchAllowed, can } from '../rbac/service';
 import { contractPdf } from './pdf';
 import { notifyContract } from '../zalo/service';
+import { nextContractCode } from './codes';
 import { addEvent, contractToApi, isPtCategory, lastPaymentDates, lastPaymentMethods, lockContract, syncMemberStatus, type Tx } from './service';
 
 export const contractsRouter = Router();
@@ -26,6 +27,8 @@ const createSchema = z.object({
     .object({ type: z.enum(['bonus_months', 'bonus_days', 'bonus_sessions', 'percent', 'amount']), value: z.number().int().min(1) })
     .nullish(),
   renewed_from_id: uuid.nullish(),
+  sale_user_id: uuid.nullish(),
+  pt_user_id: uuid.nullish(),
   note: z.string().trim().max(500).nullish(),
 });
 const listSchema = z.object({
@@ -34,6 +37,7 @@ const listSchema = z.object({
   status: z.enum(['draft', 'signed', 'active', 'frozen', 'expired', 'cancelled']).optional(),
   branch_id: uuid.optional(),
   category: z.enum(['member', 'pt_1on1', 'pt_1on2', 'pt_group']).optional(),
+  pt_user_id: uuid.optional(),
   expiring_within_days: z.coerce.number().int().min(0).max(365).optional(),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(20),
@@ -48,11 +52,6 @@ async function scoped(req: Request, id: string) {
 
 const invalid = (c: { status: string }, action: string) =>
   conflict('INVALID_STATE', `Cannot ${action} a contract in status ${c.status}`);
-
-async function nextCode(tx: Tx) {
-  const r = await tx.$queryRaw<{ n: bigint }[]>`SELECT nextval('contract_code_seq') AS n`;
-  return `CT${r[0].n}`;
-}
 
 async function snapshot(memberId: string, packageId: string, discount: number) {
   const [member, pkg] = await Promise.all([
@@ -95,6 +94,51 @@ function priceOf(pkg: { price: number; vatPercent: number }, discount: number) {
   return gross - discount;
 }
 
+
+const SALE_ROLES = ['sales', 'receptionist', 'branch_manager', 'manager'];
+
+async function staffList(roles: string[], branchIds: string[] | null) {
+  return prisma.user.findMany({
+    where: {
+      status: 'active',
+      userRoles: { some: { role: { key: { in: roles } }, ...(branchIds ? { OR: [{ branchId: { in: branchIds } }, { branchId: null }] } : {}) } },
+    },
+    select: { id: true, name: true },
+    orderBy: { name: 'asc' },
+  });
+}
+
+const saleStaffList = (branchId: string) => staffList(SALE_ROLES, [branchId]);
+const ptStaffList = (branchId: string) => staffList(['trainer'], [branchId]);
+
+async function ptStaff(branchId: string, userId: string) {
+  const u = (await ptStaffList(branchId)).find((x) => x.id === userId);
+  if (!u) throw badRequest('INVALID_PT', 'PT must be an active trainer of the contract branch');
+  return u;
+}
+
+async function saleStaff(branchId: string, userId: string) {
+  const u = (await saleStaffList(branchId)).find((x) => x.id === userId);
+  if (!u) throw badRequest('INVALID_SALE', 'Sale user must be an active staff member of the contract branch');
+  return u;
+}
+
+contractsRouter.get('/pt-staff', authorize('contracts.read'), async (req, res) => {
+  const q = z.object({ branch_id: uuid.optional() }).parse(req.query);
+  if (q.branch_id) {
+    if (!branchAllowed(req.access!, q.branch_id)) throw notFound('Branch not found');
+    return res.json({ data: await ptStaffList(q.branch_id) });
+  }
+  const a = req.access!;
+  res.json({ data: await staffList(['trainer'], a.allBranches ? null : a.branchIds) });
+});
+
+contractsRouter.get('/sale-staff', authorize('contracts.create'), async (req, res) => {
+  const q = z.object({ branch_id: uuid }).parse(req.query);
+  if (!branchAllowed(req.access!, q.branch_id)) throw notFound('Branch not found');
+  res.json({ data: await saleStaffList(q.branch_id) });
+});
+
 contractsRouter.post('/', authorize('contracts.create'), async (req, res) => {
   const b = createSchema.parse(req.body);
   const { member, pkg } = await snapshot(b.member_id, b.package_id, b.discount);
@@ -108,6 +152,8 @@ contractsRouter.post('/', authorize('contracts.create'), async (req, res) => {
   const eff = applyPromo(pkg, b.discount, b.promo);
   const total = priceOf(pkg, eff.discount);
   const userId = req.auth!.userId;
+  const sale = b.sale_user_id ? await saleStaff(member.branchId, b.sale_user_id) : null;
+  const pt = b.pt_user_id ? await ptStaff(member.branchId, b.pt_user_id) : null;
   let renewedFromId: string | null = null;
   if (b.renewed_from_id) {
     const old = await scoped(req, b.renewed_from_id);
@@ -118,7 +164,11 @@ contractsRouter.post('/', authorize('contracts.create'), async (req, res) => {
   const created = await prisma.$transaction(async (tx) => {
     const c = await tx.contract.create({
       data: {
-        code: await nextCode(tx),
+        code: await nextContractCode(tx, isPtCategory(pkg.category)),
+        saleUserId: sale?.id ?? null,
+        saleName: sale?.name ?? null,
+        ptUserId: pt?.id ?? null,
+        ptName: pt?.name ?? null,
         memberId: member.id,
         packageId: pkg.id,
         packageName: pkg.name,
@@ -145,7 +195,11 @@ contractsRouter.post('/', authorize('contracts.create'), async (req, res) => {
     if (bundledPkg) {
       child = await tx.contract.create({
         data: {
-          code: await nextCode(tx),
+          code: await nextContractCode(tx, false),
+          saleUserId: sale?.id ?? null,
+          saleName: sale?.name ?? null,
+          ptUserId: pt?.id ?? null,
+          ptName: pt?.name ?? null,
           memberId: member.id,
           packageId: bundledPkg.id,
           packageName: bundledPkg.name,
@@ -175,6 +229,7 @@ contractsRouter.get('/', authorize('contracts.read'), async (req, res) => {
   if (q.member_id) where.memberId = q.member_id;
   if (q.status) where.status = q.status;
   if (q.category) where.package = { category: q.category };
+  if (q.pt_user_id) where.ptUserId = q.pt_user_id;
   if (q.expiring_within_days !== undefined) {
     const today = dateOnly(todayVN());
     where.status = 'active';
@@ -336,7 +391,11 @@ contractsRouter.post('/:id/renew', authorize('contracts.create'), async (req, re
   const created = await prisma.$transaction(async (tx) => {
     const c = await tx.contract.create({
       data: {
-        code: await nextCode(tx),
+        code: await nextContractCode(tx, isPtCategory(pkg.category)),
+        saleUserId: old.saleUserId,
+        saleName: old.saleName,
+        ptUserId: old.ptUserId,
+        ptName: old.ptName,
         memberId: old.memberId,
         packageId: pkg.id,
         packageName: pkg.name,

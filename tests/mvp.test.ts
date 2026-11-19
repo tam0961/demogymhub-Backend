@@ -332,7 +332,7 @@ describe('MVP journey', () => {
     expect(created.status).toBe(201);
     const c = created.body.data;
     expect(c).toMatchObject({ status: 'draft', total_amount: 500000, discount: 50000, paid_amount: 0, debt_amount: 500000, branch_id: nb });
-    expect(c.code).toMatch(/^CT\d+$/);
+    expect(c.code).toMatch(/^HD\d{6}$/);
 
     expect((await request(app).post(`/api/contracts/${c.id}/activate`).set(h('receptionist')).send({})).body.error.code).toBe('INVALID_STATE');
     const signed = await request(app).post(`/api/contracts/${c.id}/sign`).set(h('receptionist')).send({ signature: 'data:image/png;base64,iVBORw0KGgo=' });

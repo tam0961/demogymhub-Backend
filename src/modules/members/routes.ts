@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import type { Member, Prisma } from '@prisma/client';
 import { audit } from '../../lib/audit';
+import { nextMemberCode } from '../contracts/codes';
 import { HttpError, badRequest, conflict, notFound } from '../../lib/errors';
 import { prisma } from '../../lib/prisma';
 import { authenticate, authorize } from '../../middlewares/auth';
@@ -46,6 +47,7 @@ const listSchema = z.object({
   q: z.string().trim().max(100).optional(),
   status: z.enum(['active', 'expired', 'frozen']).optional(),
   branch_id: z.string().uuid().optional(),
+  pt_user_id: z.string().uuid().optional(),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(20),
 });
@@ -99,15 +101,11 @@ async function assertUnique(phoneVal?: string, code?: string, exceptId?: string,
   }
 }
 
-async function nextCode() {
-  const r = await prisma.$queryRaw<{ n: bigint }[]>`SELECT nextval('member_code_seq') AS n`;
-  return `GH${r[0].n}`;
-}
-
 membersRouter.get('/', authorize('members.read'), async (req, res) => {
   const q = listSchema.parse(req.query);
   const where: Prisma.MemberWhereInput = { ...branchFilter(req, q.branch_id) };
   if (q.status) where.status = q.status;
+  if (q.pt_user_id) where.contracts = { some: { ptUserId: q.pt_user_id, status: { in: ['signed', 'active', 'frozen'] } } };
   if (q.q) {
     where.OR = [
       { name: { contains: q.q, mode: 'insensitive' } },
@@ -148,7 +146,7 @@ membersRouter.post('/', authorize('members.create'), async (req, res) => {
   await assertUnique(b.phone, b.code, undefined, b.face_id);
   const m = await prisma.member.create({
     data: {
-      code: b.code ?? (await nextCode()),
+      code: b.code ?? (await nextMemberCode()),
       name: b.name,
       phone: b.phone,
       email: b.email ?? null,

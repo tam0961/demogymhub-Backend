@@ -146,7 +146,7 @@ describe('members behavior', () => {
       ['avatar_url', 'branch_id', 'code', 'created_at', 'dob', 'email', 'face_id', 'gender', 'has_photo', 'id', 'name', 'phone', 'photo_version', 'status'].sort(),
     );
     expect(r.body.data).toMatchObject({ status: 'active', branch_id: nb, dob: '1999-05-20', email: 'f@x.com' });
-    expect(r.body.data.code).toMatch(/^GH\d+$/);
+    expect(r.body.data.code).toMatch(/^HV\d{4,}$/);
     const bad = await request(app).post('/api/members').set(auth('receptionist')).send({ name: '', phone: 'abc' });
     expect(bad.status).toBe(400);
     expect(bad.body.error.code).toBe('VALIDATION_ERROR');

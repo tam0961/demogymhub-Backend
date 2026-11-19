@@ -3,6 +3,7 @@ import type { Request } from 'express';
 import { z } from 'zod';
 import type { Lead, Prisma } from '@prisma/client';
 import { audit } from '../../lib/audit';
+import { nextMemberCode } from '../contracts/codes';
 import { conflict, notFound } from '../../lib/errors';
 import { prisma } from '../../lib/prisma';
 import { authenticate, authorize } from '../../middlewares/auth';
@@ -144,9 +145,9 @@ leadsRouter.post('/:id/convert', authorize('leads.update'), async (req, res) => 
   if (await prisma.member.findFirst({ where: { phone: cur.phone }, select: { id: true } })) {
     throw conflict('DUPLICATE_PHONE', 'Phone number already exists');
   }
-  const seq = await prisma.$queryRaw<{ n: bigint }[]>`SELECT nextval('member_code_seq') AS n`;
+  const memberCode = await nextMemberCode();
   const m = await prisma.member.create({
-    data: { code: `GH${seq[0].n}`, name: cur.name, phone: cur.phone, email: cur.email, branchId: cur.branchId },
+    data: { code: memberCode, name: cur.name, phone: cur.phone, email: cur.email, branchId: cur.branchId },
   });
   const l = await prisma.lead.update({ where: { id }, data: { status: 'converted', memberId: m.id } });
   await audit(req.auth!.userId, 'lead.converted', { member_id: m.id }, req.ip, id);

@@ -292,6 +292,10 @@ model Contract {
   renewedFromId String?        @map("renewed_from_id") @db.Uuid
   bundleOfId    String?        @map("bundle_of_id") @db.Uuid
   packageName   String?        @map("package_name")
+  saleUserId    String?        @map("sale_user_id") @db.Uuid
+  saleName      String?        @map("sale_name")
+  ptUserId      String?        @map("pt_user_id") @db.Uuid
+  ptName        String?        @map("pt_name")
   note          String?
   createdBy     String?        @map("created_by") @db.Uuid
   createdAt     DateTime       @default(now()) @map("created_at") @db.Timestamptz
@@ -312,6 +316,7 @@ model Contract {
   @@index([branchId, status])
   @@index([endDate])
   @@index([bundleOfId])
+  @@index([ptUserId])
   @@map("contracts")
 }
 
