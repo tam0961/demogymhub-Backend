@@ -114,6 +114,7 @@ describe('device employee numbers for DemoGym enrollments', () => {
   it('maps member codes to the 8xxxxxx range and back', async () => {
     expect(deviceEmpNo('HV1453', null)).toBe('8001453');
     expect(deviceEmpNo('HV0389', 'X')).toBe('8000389');
+    expect(deviceEmpNo('GH1000', null)).toBe('9001000');
     expect(deviceEmpNo('ABC', 'FACE9')).toBe('FACE9');
     const code = `HV${6000 + (Date.now() % 900)}`;
     const m = await prisma.member.create({ data: { code, name: 'Khach Dai 8', phone: `04${sfx.replace(/\D/g, '').padEnd(8, '6').slice(0, 8)}`, branchId: A } });
@@ -124,3 +125,23 @@ describe('device employee numbers for DemoGym enrollments', () => {
     expect(it0.member.id).toBe(m.id);
   });
 });
+
+describe('enrolling a member with a non-HV code', () => {
+  it('assigns a 9xxxxxx device number, stores it as face id, and scans resolve to that member', async () => {
+    const n = 2000 + (Date.now() % 700);
+    const code = `GH${n}`;
+    const m = await prisma.member.create({ data: { code, name: 'Khach GH', phone: `03${sfx.replace(/\D/g, '').padEnd(8, '7').slice(0, 8)}`, branchId: A } });
+    await prisma.memberPhoto.create({ data: { memberId: m.id, contentType: 'image/jpeg', data: Buffer.from('jpegbytes') } });
+    const r = await request(app).post('/api/attendance/face-jobs').set(h()).send({ member_id: m.id, consent: true });
+    expect(r.status).toBe(201);
+    const emp = `9${String(n).padStart(6, '0')}`;
+    expect((await prisma.member.findUniqueOrThrow({ where: { id: m.id } })).faceId).toBe(emp);
+    const claim = await request(app).get(`/api/public/attendance/jobs/${key}`);
+    expect(claim.body.data.find((j: { employee_no: string }) => j.employee_no === emp)).toBeTruthy();
+    const since = new Date(Date.now() - 1000).toISOString();
+    await scan(emp);
+    const sc = await request(app).get('/api/attendance/scans').query({ since }).set(h());
+    expect(sc.body.data.items.find((x: { employee_no: string }) => x.employee_no === emp).member.id).toBe(m.id);
+  });
+});
+

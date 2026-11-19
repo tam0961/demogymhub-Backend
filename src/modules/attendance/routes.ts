@@ -80,10 +80,11 @@ export async function recordPunch(deviceId: string | null, p: RawPunch, source =
 
 const ENROLL_RANGE = /^8\d{6}$/;
 
-/** Employee number written to the device for people enrolled from DemoGym: "8" + 6 digits of the member code (HV1453 -> 8001453), a range NextX does not use. */
+/** Employee number written to the device for people enrolled from DemoGym, in ranges NextX does not use:
+ * "8" + 6 digits for HV codes (HV1453 -> 8001453), "9" + 6 digits for any other prefix (GH1000 -> 9001000). */
 export function deviceEmpNo(code: string, faceId: string | null): string {
   const digits = code.replace(/\D/g, '');
-  if (digits && digits.length <= 6) return `8${digits.padStart(6, '0')}`;
+  if (digits && digits.length <= 6) return `${/^HV/i.test(code) ? '8' : '9'}${digits.padStart(6, '0')}`;
   return faceId ?? code;
 }
 
@@ -275,6 +276,12 @@ attendanceRouter.post('/face-jobs', authorize('members.update'), async (req, res
   if (!photo) throw conflict('NO_PHOTO', 'Member has no face photo');
   const devices = await prisma.staffDevice.findMany({ where: { branchId: m.branchId }, select: { id: true } });
   if (!devices.length) throw conflict('NO_DEVICE', 'No attendance device for this branch');
+  if (!m.faceId) {
+    const emp = deviceEmpNo(m.code, null);
+    const taken = await prisma.member.findFirst({ where: { faceId: emp, id: { not: m.id } }, select: { id: true } });
+    if (taken) throw conflict('FACE_ID_TAKEN', 'Device number already used by another member');
+    await prisma.member.update({ where: { id: m.id }, data: { faceId: emp } });
+  }
   await prisma.faceJob.updateMany({ where: { memberId: m.id, status: { in: ['pending', 'claimed'] } }, data: { status: 'failed', message: 'Replaced by a newer request', finishedAt: new Date() } });
   const jobs = await Promise.all(devices.map((d) => prisma.faceJob.create({ data: { deviceId: d.id, memberId: m.id, createdBy: req.auth!.userId } })));
   await audit(req.auth!.userId, 'face.enroll_requested', { member_id: m.id, consent: true, devices: devices.length }, req.ip, m.id);
