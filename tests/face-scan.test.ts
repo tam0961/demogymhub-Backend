@@ -165,3 +165,15 @@ describe('scan feed long poll', () => {
   });
 });
 
+describe('bridge heartbeat', () => {
+  it('reports the bridge as down when the device was not seen recently, and up after a ping', async () => {
+    await prisma.staffDevice.updateMany({ where: { deviceKey: key }, data: { lastSeenAt: new Date(Date.now() - 10 * 60_000) } });
+    const down = await request(app).get('/api/attendance/scans').query({ since: new Date().toISOString() }).set(h());
+    expect(down.body.data.bridge_ok).toBe(false);
+    expect((await request(app).get(`/api/public/attendance/ping/${key}`)).status).toBe(200);
+    const up = await request(app).get('/api/attendance/scans').query({ since: new Date().toISOString() }).set(h());
+    expect(up.body.data.bridge_ok).toBe(true);
+    expect((await request(app).get('/api/public/attendance/ping/nope')).status).toBe(404);
+  });
+});
+

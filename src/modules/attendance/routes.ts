@@ -145,6 +145,16 @@ attendancePublicRouter.post('/hikvision/:key', express.raw({ type: () => true, l
   res.json({ status: 'ok' });
 });
 
+attendancePublicRouter.get('/ping/:key', async (req, res) => {
+  const device = await prisma.staffDevice.findUnique({ where: { deviceKey: String(req.params.key) }, select: { id: true } });
+  if (!device) {
+    res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Unknown device' } });
+    return;
+  }
+  await prisma.staffDevice.update({ where: { id: device.id }, data: { lastSeenAt: new Date() } });
+  res.json({ status: 'ok' });
+});
+
 attendancePublicRouter.get('/jobs/:key', async (req, res) => {
   const device = await prisma.staffDevice.findUnique({ where: { deviceKey: String(req.params.key) } });
   if (!device) {
@@ -290,7 +300,9 @@ attendanceRouter.get('/scans', authorize('checkins.read'), async (req, res) => {
       },
     });
   }
-  res.json({ data: { now: now.toISOString(), items } });
+  const devices = await prisma.staffDevice.findMany({ where: bf, select: { lastSeenAt: true } });
+  const bridgeOk = devices.length ? devices.some((d) => d.lastSeenAt && Date.now() - d.lastSeenAt.getTime() < 90_000) : null;
+  res.json({ data: { now: now.toISOString(), items, bridge_ok: bridgeOk } });
 });
 
 attendanceRouter.post('/face-jobs', authorize('members.update'), async (req, res) => {
