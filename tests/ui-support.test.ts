@@ -551,7 +551,7 @@ describe('package bundles, versions and deactivation', () => {
     const m = (await memberPkg()).body.data;
     const p = (await ptPkg(m.id)).body.data;
     const mem = await mkMember(A);
-    const created = await asMgr('post', '/api/contracts', { member_id: mem.id, package_id: p.id });
+    const created = await asMgr('post', '/api/contracts', { member_id: mem.id, package_id: p.id, pt_user_id: ids.trainer });
     expect(created.status).toBe(201);
     const pt = created.body.data;
     expect(pt.total_amount).toBe(3000000);
@@ -588,7 +588,7 @@ describe('package bundles, versions and deactivation', () => {
     const p = (await ptPkg(m.id)).body.data;
     const mem = await mkMember(A);
     const running = await mkContract(mem.id, A, { status: 'active', end: addDays(today(), 10) });
-    const pt = (await asMgr('post', '/api/contracts', { member_id: mem.id, package_id: p.id })).body.data;
+    const pt = (await asMgr('post', '/api/contracts', { member_id: mem.id, package_id: p.id, pt_user_id: ids.trainer })).body.data;
     await asMgr('post', `/api/contracts/${pt.id}/sign`, { signature: 'data:image/png;base64,AAAA' });
     await prisma.contract.update({ where: { id: pt.id }, data: { paidAmount: 3000000 } });
     await asMgr('post', `/api/contracts/${pt.id}/activate`, {});
@@ -600,12 +600,12 @@ describe('package bundles, versions and deactivation', () => {
   it('a PT package without an included package creates one contract; an inactive included package blocks the sale', async () => {
     const p = (await ptPkg(null)).body.data;
     const mem = await mkMember(A);
-    const one = await asMgr('post', '/api/contracts', { member_id: mem.id, package_id: p.id });
+    const one = await asMgr('post', '/api/contracts', { member_id: mem.id, package_id: p.id, pt_user_id: ids.trainer });
     expect(one.body.data.bundled_contracts).toBeUndefined();
     const m = (await memberPkg()).body.data;
     const withBundle = (await ptPkg(m.id)).body.data;
     await prisma.package.update({ where: { id: m.id }, data: { active: false } });
-    const blocked = await asMgr('post', '/api/contracts', { member_id: mem.id, package_id: withBundle.id });
+    const blocked = await asMgr('post', '/api/contracts', { member_id: mem.id, package_id: withBundle.id, pt_user_id: ids.trainer });
     expect(blocked.status).toBe(409);
     expect(blocked.body.error.code).toBe('BUNDLED_PACKAGE_INACTIVE');
   });
@@ -738,7 +738,7 @@ describe('package options: bundle only, gift, check-in time limit', () => {
       name: `PT ${uniq()}`, type: 'session', category: 'pt_1on1', sessions: 10, price: 100, branch_id: A, bundled_member_package_id: created.body.data.id,
     });
     expect(pt.status).toBe(201);
-    const sold = await mgr('post', '/api/contracts', { member_id: mem.id, package_id: pt.body.data.id });
+    const sold = await mgr('post', '/api/contracts', { member_id: mem.id, package_id: pt.body.data.id, pt_user_id: ids.trainer });
     expect(sold.status).toBe(201);
     expect(sold.body.data.bundled_contracts).toHaveLength(1);
     const keep = await mgr('patch', `/api/packages/${created.body.data.id}`, { active: true });

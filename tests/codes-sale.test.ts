@@ -45,10 +45,13 @@ describe('member and contract code rules', () => {
     expect(c1.body.data.code).toMatch(new RegExp(`^HD${yy}\\d{4}$`));
     expect(c1.body.data.sale.id).toBe(saleId);
 
-    const c2 = await request(app).post('/api/contracts').set(h()).send({ member_id: m.id, package_id: ptPkg.id });
+    const c2 = await request(app).post('/api/contracts').set(h()).send({ member_id: m.id, package_id: ptPkg.id, pt_user_id: ptId });
     expect(c2.status).toBe(201);
     expect(c2.body.data.code).toMatch(new RegExp(`^HP${yy}\\d{4}$`));
     expect(c2.body.data.sale).toBeNull();
+    const noPt = await request(app).post('/api/contracts').set(h()).send({ member_id: m.id, package_id: ptPkg.id });
+    expect(noPt.status).toBe(400);
+    expect(noPt.body.error.code).toBe('PT_REQUIRED');
 
     const c3 = await request(app).post('/api/contracts').set(h()).send({ member_id: m.id, package_id: memPkg.id });
     expect(Number(c3.body.data.code.slice(4))).toBe(Number(c1.body.data.code.slice(4)) + 1);
@@ -86,9 +89,12 @@ describe('PT in charge on contracts and filters', () => {
     expect(staff.body.data.map((x: { id: string }) => x.id)).toContain(ptId);
 
     const cl = await request(app).get('/api/contracts').query({ pt_user_id: ptId }).set(h());
-    expect(cl.body.data.map((x: { id: string }) => x.id)).toEqual([ok.body.data.id]);
+    const cids = cl.body.data.map((x: { id: string }) => x.id);
+    expect(cids).toContain(ok.body.data.id);
+    expect(cl.body.data.every((x: { pt: { id: string } | null }) => x.pt?.id === ptId)).toBe(true);
     const ml = await request(app).get('/api/members').query({ pt_user_id: ptId }).set(h());
-    expect(ml.body.data.map((x: { id: string }) => x.id)).toEqual([m.id]);
+    expect(ml.body.data.map((x: { id: string }) => x.id)).toContain(m.id);
+    expect(ml.body.data.map((x: { id: string }) => x.id)).not.toContain(m2.id);
   });
 });
 

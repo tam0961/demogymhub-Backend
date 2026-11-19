@@ -95,7 +95,7 @@ function priceOf(pkg: { price: number; vatPercent: number }, discount: number) {
 }
 
 
-const SALE_ROLES = ['sales', 'receptionist', 'branch_manager', 'manager'];
+const SALE_ROLES = ['sales', 'receptionist', 'branch_manager', 'manager', 'trainer'];
 
 async function staffList(roles: string[], branchIds: string[] | null) {
   return prisma.user.findMany({
@@ -153,6 +153,7 @@ contractsRouter.post('/', authorize('contracts.create'), async (req, res) => {
   const total = priceOf(pkg, eff.discount);
   const userId = req.auth!.userId;
   const sale = b.sale_user_id ? await saleStaff(member.branchId, b.sale_user_id) : null;
+  if (isPtCategory(pkg.category) && !b.pt_user_id) throw badRequest('PT_REQUIRED', 'PT in charge is required for PT packages');
   const pt = b.pt_user_id ? await ptStaff(member.branchId, b.pt_user_id) : null;
   let renewedFromId: string | null = null;
   if (b.renewed_from_id) {
