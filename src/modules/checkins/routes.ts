@@ -45,17 +45,19 @@ async function findMember(req: Request, b: z.infer<typeof memberRef>) {
 
 type Outcome = { result: 'allowed' | 'denied'; reason: string | null; contract: Contract | null; checkinId: string };
 
-async function logDenied(req: Request, m: Member, branchId: string, reason: string, contract: Contract | null): Promise<Outcome> {
+export type Actor = { userId: string | null; ip?: string };
+
+async function logDenied(actor: Actor, m: Member, branchId: string, reason: string, contract: Contract | null): Promise<Outcome> {
   const c = await prisma.checkin.create({
-    data: { memberId: m.id, contractId: contract?.id ?? null, branchId, result: 'denied', reason, createdBy: req.auth!.userId },
+    data: { memberId: m.id, contractId: contract?.id ?? null, branchId, result: 'denied', reason, createdBy: actor.userId },
   });
-  await audit(req.auth!.userId, 'checkin.denied', { member_id: m.id, reason, checkin_id: c.id }, req.ip, c.id);
+  await audit(actor.userId, 'checkin.denied', { member_id: m.id, reason, checkin_id: c.id }, actor.ip, c.id);
   return { result: 'denied', reason, contract, checkinId: c.id };
 }
 
-async function evaluate(req: Request, m: Member, branchId: string): Promise<Outcome> {
-  const userId = req.auth!.userId;
-  if (m.branchId !== branchId) return logDenied(req, m, branchId, 'WRONG_BRANCH', null);
+export async function evaluateCheckin(actor: Actor, m: Member, branchId: string): Promise<Outcome> {
+  const userId = actor.userId;
+  if (m.branchId !== branchId) return logDenied(actor, m, branchId, 'WRONG_BRANCH', null);
   const today = dateOnly(todayVN());
 
   const inside = await prisma.checkin.findFirst({
@@ -122,11 +124,11 @@ async function evaluate(req: Request, m: Member, branchId: string): Promise<Outc
       else if (res) return { result: 'allowed', reason: null, contract: res.contract, checkinId: res.id };
     }
   }
-  if (frozen) return logDenied(req, m, m.branchId, 'FROZEN', frozen);
-  if (noSessions) return logDenied(req, m, m.branchId, 'NO_SESSIONS', noSessions);
-  if (outside) return logDenied(req, m, m.branchId, 'OUTSIDE_HOURS', outside);
-  if (expired) return logDenied(req, m, m.branchId, 'EXPIRED', expired);
-  return logDenied(req, m, m.branchId, 'NO_ACTIVE_CONTRACT', null);
+  if (frozen) return logDenied(actor, m, m.branchId, 'FROZEN', frozen);
+  if (noSessions) return logDenied(actor, m, m.branchId, 'NO_SESSIONS', noSessions);
+  if (outside) return logDenied(actor, m, m.branchId, 'OUTSIDE_HOURS', outside);
+  if (expired) return logDenied(actor, m, m.branchId, 'EXPIRED', expired);
+  return logDenied(actor, m, m.branchId, 'NO_ACTIVE_CONTRACT', null);
 }
 
 const respond = (m: Member, o: Outcome, branch: { id: string; code: string; name: string }) => ({
@@ -157,7 +159,7 @@ checkinsRouter.post('/', denyViewOnly, authorize('checkins.create'), async (req,
     await prisma.checkin.updateMany({ where: { id: open.id, checkedOutAt: null }, data: { checkedOutAt: new Date() } });
     return res.json(respond(m, { result: 'allowed', reason: null, contract: open.contract, checkinId: open.id }, branch));
   }
-  res.json(respond(m, await evaluate(req, m, branchId), branch));
+  res.json(respond(m, await evaluateCheckin({ userId: req.auth!.userId, ip: req.ip }, m, branchId), branch));
 });
 
 checkinsRouter.post(

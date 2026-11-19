@@ -9,6 +9,7 @@ import { prisma } from '../../lib/prisma';
 import { authenticate, authorize } from '../../middlewares/auth';
 import { branchFilter, writeBranch } from '../rbac/scope';
 import { branchAllowed } from '../rbac/service';
+import { evaluateCheckin } from '../checkins/routes';
 
 const uuid = z.string().uuid();
 
@@ -93,9 +94,24 @@ export async function routeScan(device: { id: string; branchId: string }, p: Raw
     select: { id: true },
   });
   if (recent) return null;
-  const m = await findMemberForScan(p.employeeNo);
-  if (!m) await recordPunch(device.id, p);
-  return prisma.faceEvent.create({ data: { deviceId: device.id, branchId: device.branchId, employeeNo: p.employeeNo, memberId: m?.id ?? null, scannedAt: new Date() } });
+  const ref = await findMemberForScan(p.employeeNo);
+  if (!ref) await recordPunch(device.id, p);
+  let result: string | null = null;
+  let reason: string | null = null;
+  let checkinId: string | null = null;
+  if (ref) {
+    const member = await prisma.member.findUniqueOrThrow({ where: { id: ref.id } });
+    try {
+      const o = await evaluateCheckin({ userId: null }, member, device.branchId);
+      result = o.result;
+      reason = o.reason;
+      checkinId = o.checkinId;
+    } catch {
+      result = 'denied';
+      reason = 'ERROR';
+    }
+  }
+  return prisma.faceEvent.create({ data: { deviceId: device.id, branchId: device.branchId, employeeNo: p.employeeNo, memberId: ref?.id ?? null, result, reason, checkinId, scannedAt: new Date() } });
 }
 
 export const attendancePublicRouter = Router();
@@ -200,7 +216,7 @@ attendanceRouter.get('/scans', authorize('checkins.read'), async (req, res) => {
   const todayStr = vnDayOf(now);
   const items = [];
   for (const e of rows) {
-    const base = { id: e.id, employee_no: e.employeeNo, scanned_at: e.scannedAt.toISOString() };
+    const base = { id: e.id, employee_no: e.employeeNo, scanned_at: e.scannedAt.toISOString(), result: e.result, reason: e.reason };
     if (!e.memberId) {
       items.push({ ...base, member: null });
       continue;

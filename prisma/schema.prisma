@@ -648,6 +648,9 @@ model FaceEvent {
   branchId   String   @map("branch_id") @db.Uuid
   employeeNo String   @map("employee_no")
   memberId   String?  @map("member_id") @db.Uuid
+  result     String?
+  reason     String?
+  checkinId  String?  @map("checkin_id") @db.Uuid
   scannedAt  DateTime @default(now()) @map("scanned_at") @db.Timestamptz
 
   @@index([branchId, scannedAt])

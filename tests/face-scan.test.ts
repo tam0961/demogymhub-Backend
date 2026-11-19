@@ -40,6 +40,19 @@ describe('face scan popup feed', () => {
     expect(it0.member.name).toBe('Khach Quet');
     expect(it0.member.state).toBe('ok');
     expect(it0.member.debt).toBe(600);
+    expect(it0.result).toBe('allowed');
+    expect(await prisma.checkin.count({ where: { memberId, result: 'allowed' } })).toBe(1);
+  });
+
+  it('records a denied result when the member has no usable package', async () => {
+    const m2 = await prisma.member.create({ data: { code: `HVN${sfx}`, name: 'Khach Khong Goi', phone: `05${sfx.replace(/\D/g, '').padEnd(8, '4').slice(0, 8)}`, branchId: A } });
+    const since = new Date(Date.now() - 1000).toISOString();
+    await scan(`HVN${sfx}`);
+    const r = await request(app).get('/api/attendance/scans').query({ since }).set(h());
+    const it0 = r.body.data.items.find((x: { employee_no: string }) => x.employee_no === `HVN${sfx}`);
+    expect(it0.result).toBe('denied');
+    expect(it0.reason).toBe('NO_ACTIVE_CONTRACT');
+    expect(await prisma.checkin.count({ where: { memberId: m2.id, result: 'allowed' } })).toBe(0);
   });
 
   it('reports an unknown code and ignores a repeat within 10 seconds', async () => {
