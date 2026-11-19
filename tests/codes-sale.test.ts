@@ -98,3 +98,23 @@ describe('PT in charge on contracts and filters', () => {
   });
 });
 
+describe('changing Sale and PT on an existing contract', () => {
+  it('updates both, keeps PT required on PT packages, and rejects staff from another branch', async () => {
+    const m = await prisma.member.create({ data: { code: `HV5${sfx.slice(-3).replace(/\D/g, '6')}`, name: 'Khach Doi PT', phone: `05${sfx.replace(/\D/g, '').padEnd(8, '8').slice(0, 8)}`, branchId: A } });
+    const pkg = await prisma.package.create({ data: { name: `D ${sfx}`, type: 'session', category: 'pt_1on1', sessions: 5, price: 1000, branchId: A } });
+    const c = await request(app).post('/api/contracts').set(h()).send({ member_id: m.id, package_id: pkg.id, pt_user_id: ptId });
+    expect(c.status).toBe(201);
+    const ok = await request(app).patch(`/api/contracts/${c.body.data.id}/staff`).set(h()).send({ sale_user_id: saleId });
+    expect(ok.status).toBe(200);
+    expect(ok.body.data.sale.id).toBe(saleId);
+    expect(ok.body.data.pt.id).toBe(ptId);
+    const noPt = await request(app).patch(`/api/contracts/${c.body.data.id}/staff`).set(h()).send({ pt_user_id: null });
+    expect(noPt.status).toBe(400);
+    expect(noPt.body.error.code).toBe('PT_REQUIRED');
+    const bad = await request(app).patch(`/api/contracts/${c.body.data.id}/staff`).set(h()).send({ sale_user_id: otherId });
+    expect(bad.status).toBe(400);
+    const clear = await request(app).patch(`/api/contracts/${c.body.data.id}/staff`).set(h()).send({ sale_user_id: null });
+    expect(clear.body.data.sale).toBeNull();
+  });
+});
+

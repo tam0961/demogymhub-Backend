@@ -123,6 +123,34 @@ async function saleStaff(branchId: string, userId: string) {
   return u;
 }
 
+contractsRouter.patch('/:id/staff', authorize('contracts.create'), async (req, res) => {
+  const id = uuid.parse(req.params.id);
+  const b = z.object({ sale_user_id: uuid.nullish(), pt_user_id: uuid.nullish() }).parse(req.body);
+  const cur = await scoped(req, id);
+  const pkg = await prisma.package.findUniqueOrThrow({ where: { id: cur.packageId }, select: { category: true } });
+  if (b.pt_user_id === null && isPtCategory(pkg.category)) throw badRequest('PT_REQUIRED', 'PT in charge is required for PT packages');
+  const data: { saleUserId?: string | null; saleName?: string | null; ptUserId?: string | null; ptName?: string | null } = {};
+  if (b.sale_user_id !== undefined) {
+    const u = b.sale_user_id ? await saleStaff(cur.branchId, b.sale_user_id) : null;
+    data.saleUserId = u?.id ?? null;
+    data.saleName = u?.name ?? null;
+  }
+  if (b.pt_user_id !== undefined) {
+    const u = b.pt_user_id ? await ptStaff(cur.branchId, b.pt_user_id) : null;
+    data.ptUserId = u?.id ?? null;
+    data.ptName = u?.name ?? null;
+  }
+  if (!Object.keys(data).length) throw badRequest('NOTHING_TO_UPDATE', 'Provide sale_user_id or pt_user_id');
+  const userId = req.auth!.userId;
+  const out = await prisma.$transaction(async (tx) => {
+    await tx.contract.updateMany({ where: { OR: [{ id }, { bundleOfId: id }] }, data });
+    await addEvent(tx, id, 'staff_changed', userId, null, { from: { sale: cur.saleName, pt: cur.ptName }, to: { sale: data.saleName ?? cur.saleName, pt: data.ptName ?? cur.ptName } });
+    return tx.contract.findUniqueOrThrow({ where: { id }, include: { member: true, package: true } });
+  });
+  await audit(userId, 'contract.staff_changed', { contract_id: id, ...data }, req.ip, id);
+  res.json({ data: contractToApi(out) });
+});
+
 contractsRouter.get('/pt-staff', authorize('contracts.read'), async (req, res) => {
   const q = z.object({ branch_id: uuid.optional() }).parse(req.query);
   if (q.branch_id) {
