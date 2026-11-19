@@ -164,7 +164,7 @@ contractsRouter.post('/', authorize('contracts.create'), async (req, res) => {
   const created = await prisma.$transaction(async (tx) => {
     const c = await tx.contract.create({
       data: {
-        code: await nextContractCode(tx, pkg.category),
+        code: await nextContractCode(tx, isPtCategory(pkg.category)),
         saleUserId: sale?.id ?? null,
         saleName: sale?.name ?? null,
         ptUserId: pt?.id ?? null,
@@ -195,7 +195,7 @@ contractsRouter.post('/', authorize('contracts.create'), async (req, res) => {
     if (bundledPkg) {
       child = await tx.contract.create({
         data: {
-          code: await nextContractCode(tx, bundledPkg.category),
+          code: await nextContractCode(tx, false),
           saleUserId: sale?.id ?? null,
           saleName: sale?.name ?? null,
           ptUserId: pt?.id ?? null,
@@ -391,7 +391,7 @@ contractsRouter.post('/:id/renew', authorize('contracts.create'), async (req, re
   const created = await prisma.$transaction(async (tx) => {
     const c = await tx.contract.create({
       data: {
-        code: await nextContractCode(tx, pkg.category),
+        code: await nextContractCode(tx, isPtCategory(pkg.category)),
         saleUserId: old.saleUserId,
         saleName: old.saleName,
         ptUserId: old.ptUserId,

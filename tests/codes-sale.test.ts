@@ -1,6 +1,7 @@
 import request from 'supertest';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { prisma } from '../src/lib/prisma';
+import { todayVN } from '../src/lib/dates';
 import { app, makeUser, tokenFor } from './helpers';
 
 const sfx = Date.now().toString(36);
@@ -10,6 +11,7 @@ let saleId = '';
 let otherId = '';
 let ptId = '';
 const h = () => ({ Authorization: `Bearer ${rec}`, 'X-Branch-Id': A });
+const yy = todayVN().slice(2, 4);
 
 beforeAll(async () => {
   const code = `cs${sfx}`;
@@ -33,23 +35,23 @@ describe('member and contract code rules', () => {
     expect(n).toBeGreaterThan(1457);
   });
 
-  it('numbers contracts GHD for member, GPT for PT packages (+5 digits), with the Sale on the contract', async () => {
+  it('numbers contracts HD+yy for member packages and HP+yy for PT packages, with the Sale on the contract', async () => {
     const m = await prisma.member.create({ data: { code: `HV9${sfx.slice(-3).replace(/\D/g, '1')}`, name: 'Khach HD', phone: `03${sfx.replace(/\D/g, '').padEnd(8, '3').slice(0, 8)}`, branchId: A } });
     const memPkg = await prisma.package.create({ data: { name: `M ${sfx}`, type: 'month', durationDays: 30, price: 1000, branchId: A } });
     const ptPkg = await prisma.package.create({ data: { name: `P ${sfx}`, type: 'session', category: 'pt_1on1', sessions: 10, price: 2000, branchId: A } });
 
     const c1 = await request(app).post('/api/contracts').set(h()).send({ member_id: m.id, package_id: memPkg.id, sale_user_id: saleId });
     expect(c1.status).toBe(201);
-    expect(c1.body.data.code).toMatch(/^GHD\d{5}$/);
+    expect(c1.body.data.code).toMatch(new RegExp(`^HD${yy}\\d{4}$`));
     expect(c1.body.data.sale.id).toBe(saleId);
 
     const c2 = await request(app).post('/api/contracts').set(h()).send({ member_id: m.id, package_id: ptPkg.id });
     expect(c2.status).toBe(201);
-    expect(c2.body.data.code).toMatch(/^GPT\d{5}$/);
+    expect(c2.body.data.code).toMatch(new RegExp(`^HP${yy}\\d{4}$`));
     expect(c2.body.data.sale).toBeNull();
 
     const c3 = await request(app).post('/api/contracts').set(h()).send({ member_id: m.id, package_id: memPkg.id });
-    expect(Number(c3.body.data.code.slice(3))).toBe(Number(c1.body.data.code.slice(3)) + 1);
+    expect(Number(c3.body.data.code.slice(4))).toBe(Number(c1.body.data.code.slice(4)) + 1);
   });
 
   it('only accepts active staff of the contract branch as Sale and lists them', async () => {
