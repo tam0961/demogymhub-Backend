@@ -641,3 +641,31 @@ model BotSent {
 
   @@map("bot_sent")
 }
+
+model FaceEvent {
+  id         String   @id @default(uuid()) @db.Uuid
+  deviceId   String?  @map("device_id") @db.Uuid
+  branchId   String   @map("branch_id") @db.Uuid
+  employeeNo String   @map("employee_no")
+  memberId   String?  @map("member_id") @db.Uuid
+  scannedAt  DateTime @default(now()) @map("scanned_at") @db.Timestamptz
+
+  @@index([branchId, scannedAt])
+  @@map("face_events")
+}
+
+model FaceJob {
+  id         String    @id @default(uuid()) @db.Uuid
+  deviceId   String    @map("device_id") @db.Uuid
+  memberId   String    @map("member_id") @db.Uuid
+  status     String    @default("pending")
+  message    String?
+  claimedAt  DateTime? @map("claimed_at") @db.Timestamptz
+  finishedAt DateTime? @map("finished_at") @db.Timestamptz
+  createdBy  String?   @map("created_by") @db.Uuid
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([deviceId, status])
+  @@index([memberId])
+  @@map("face_jobs")
+}
