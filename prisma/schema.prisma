@@ -313,6 +313,7 @@ model Contract {
   branch     Branch              @relation(fields: [branchId], references: [id])
   events     ContractEvent[]
   payments   Payment[]
+  invoices   Invoice[]
   checkins   Checkin[]
   bundleOf   Contract?           @relation("Bundle", fields: [bundleOfId], references: [id], onDelete: SetNull)
   bundled    Contract[]          @relation("Bundle")
@@ -432,6 +433,30 @@ model InbodyRecord {
 
   @@index([memberId, measuredOn])
   @@map("inbody_records")
+}
+
+model Invoice {
+  id             String   @id @default(uuid()) @db.Uuid
+  contractId     String?  @map("contract_id") @db.Uuid
+  paymentId      String?  @map("payment_id") @db.Uuid
+  status         String
+  invoiceNo      String?  @map("invoice_no")
+  reservationCode String? @map("reservation_code")
+  transactionId  String?  @map("transaction_id")
+  buyerName      String   @map("buyer_name")
+  buyerTaxCode   String?  @map("buyer_tax_code")
+  net            Int
+  tax            Int
+  total          Int
+  payload        Json
+  error          String?
+  createdBy      String?  @map("created_by") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  contract Contract? @relation(fields: [contractId], references: [id], onDelete: SetNull)
+
+  @@index([contractId])
+  @@map("invoices")
 }
 
 model PaymentWebhookDelivery {
@@ -610,11 +635,45 @@ model Lead {
   assignedTo String?    @map("assigned_to") @db.Uuid
   trialAt    DateTime?  @map("trial_at") @db.Timestamptz
   memberId   String?    @map("member_id") @db.Uuid
+  ext        String?    @unique
   createdAt  DateTime   @default(now()) @map("created_at") @db.Timestamptz
   updatedAt  DateTime   @updatedAt @map("updated_at") @db.Timestamptz
 
   @@index([branchId, status])
   @@map("leads")
+}
+
+model MarketingCampaign {
+  id        String   @id
+  platform  String
+  name      String
+  branchId  String?  @map("branch_id") @db.Uuid
+  budget    Int      @default(0)
+  status    String   @default("paused")
+  kind      String?
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz
+
+  daily MarketingDaily[]
+
+  @@index([platform])
+  @@map("marketing_campaigns")
+}
+
+model MarketingDaily {
+  date        DateTime @db.Date
+  campaignId  String   @map("campaign_id")
+  spend       Int      @default(0)
+  impressions Int      @default(0)
+  clicks      Int      @default(0)
+  leads       Int      @default(0)
+  msgs        Int      @default(0)
+  conv        Float    @default(0)
+
+  campaign MarketingCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@id([date, campaignId])
+  @@index([date])
+  @@map("marketing_daily")
 }
 
 model PtDayOff {

@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { audit } from '../../lib/audit';
 import { prisma } from '../../lib/prisma';
 import { authenticate, authorize } from '../../middlewares/auth';
+import { autoMetrics } from './auto';
+import { marketingAutoRouter } from './auto-routes';
 
 const SHEET_KEY = 'sheets';
 const METRIC_KEY = 'marketing.metrics';
@@ -59,9 +61,13 @@ async function getMetrics(): Promise<MetricRow[]> {
 
 export const marketingRouter = Router();
 marketingRouter.use(authenticate);
+marketingRouter.use('/auto', marketingAutoRouter);
 marketingRouter.get('/metrics', authorize('reports.view'), async (req, res) => {
   const month = typeof req.query.month === 'string' ? req.query.month : '';
-  const rows = await getMetrics();
+  const manual = await getMetrics();
+  const auto = await autoMetrics(month || undefined);
+  const taken = new Set(auto.map((a) => `${a.month}|${a.channel}`));
+  const rows = [...auto.map((a) => ({ ...a, source: 'auto' as const })), ...manual.filter((r) => !taken.has(`${r.month}|${r.channel}`)).map((r) => ({ ...r, source: 'manual' as const }))].sort((x, y) => y.month.localeCompare(x.month) || x.channel.localeCompare(y.channel));
   res.json({ data: month ? rows.filter((r) => r.month === month) : rows });
 });
 marketingRouter.put('/metrics', authorize('system.manage_settings'), async (req, res) => {

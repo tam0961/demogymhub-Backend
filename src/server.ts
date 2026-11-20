@@ -3,6 +3,7 @@ import { config } from './config';
 import { logger } from './lib/logger';
 import { startExpireJob } from './modules/contracts/service';
 import { startPayrollSnapshotJob } from './modules/payroll/snapshot';
+import { startMarketingJob } from './modules/marketing/auto';
 import { startZnsJob } from './modules/zalo/service';
 import { startZaloBot } from './modules/zalobot/service';
 
@@ -13,6 +14,7 @@ createApp().listen(config.PORT, () => logger.info({ port: config.PORT, env: conf
 if (config.APP_ENV !== 'test') {
   startExpireJob();
   startZnsJob();
+  startMarketingJob();
   startPayrollSnapshotJob();
   startZaloBot();
 }

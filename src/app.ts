@@ -21,9 +21,11 @@ import { publicRouter } from './modules/pt/public';
 import { ipadPublicRouter, ipadRouter } from './modules/ipad/routes';
 import { ptBotRouter, ptRouter } from './modules/pt/routes';
 import { reportsRouter } from './modules/reports/routes';
+import { leadsInboxRouter } from './modules/leads/inbox';
 import { leadsRouter } from './modules/leads/routes';
 import { shiftsRouter } from './modules/shifts/routes';
 import { zaloRouter } from './modules/zalo/routes';
+import { mkPublicRouter } from './modules/marketing/auto-routes';
 import { marketingRouter, sheetsRouter } from './modules/marketing/routes';
 import { printRouter } from './modules/printing/routes';
 import { attendancePublicRouter, attendanceRouter } from './modules/attendance/routes';
@@ -31,6 +33,7 @@ import { payrollRouter } from './modules/payroll/routes';
 import { staffRouter } from './modules/staff/routes';
 import { dayTicketsRouter } from './modules/daytickets/routes';
 import { inbodyRouter } from './modules/inbody/routes';
+import { invoiceRouter } from './modules/invoice/routes';
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -84,6 +87,7 @@ export function createApp() {
   });
 
   app.use('/api/members', inbodyRouter);
+  app.use('/api/invoices', invoiceRouter);
   app.use('/api/members', membersRouter);
   app.use('/api/day-tickets', dayTicketsRouter);
   app.use('/api/packages', packagesRouter);
@@ -100,6 +104,8 @@ export function createApp() {
   app.use('/api/pt/bot', ptBotRouter);
   app.use('/api/pt', ptRouter);
   app.use('/api/reports', reportsRouter);
+  app.use('/api/mk', mkPublicRouter);
+  app.use('/api/leads', leadsInboxRouter);
   app.use('/api/leads', leadsRouter);
   app.use('/api/zalo', zaloRouter);
   app.use('/api/marketing', marketingRouter);
