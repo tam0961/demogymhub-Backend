@@ -618,6 +618,7 @@ model StaffDevice {
   name       String
   deviceKey  String    @unique @map("device_key")
   lastSeenAt DateTime? @map("last_seen_at") @db.Timestamptz
+  paused     Boolean   @default(false)
   createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz
 
   branch  Branch       @relation(fields: [branchId], references: [id])

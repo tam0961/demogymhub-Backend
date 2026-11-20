@@ -7,7 +7,7 @@ const keepBranch = process.argv.find((a) => a.startsWith('--receptionist-branch=
 const prisma = new PrismaClient();
 
 async function main() {
-  const users = await prisma.user.findMany({ include: { userRoles: { include: { role: true, branch: true } } }, orderBy: { createdAt: 'asc' } });
+  const users = await prisma.user.findMany({ include: { userRoles: { include: { role: true, branch: true } }, staffProfile: true }, orderBy: { createdAt: 'asc' } });
   const supers = users.filter((u) => u.userRoles.some((r) => r.role.key === 'super_admin' || r.role.key === 'owner'));
   if (supers.length === 0) throw new Error('No owner/super_admin account found, refusing to continue');
   console.log(apply ? 'APPLY' : 'DRY RUN (add --apply to execute)');
@@ -15,7 +15,7 @@ async function main() {
     const keys = u.userRoles.map((r) => `${r.role.key}${r.branch ? `@${r.branch.code}` : ''}`);
     const isOwner = u.userRoles.some((r) => r.role.key === 'super_admin' || r.role.key === 'owner');
     const isRecep = u.userRoles.some((r) => r.role.key === 'receptionist' && r.branch?.code === keepBranch);
-    const isTrainer = u.userRoles.some((r) => r.role.key === 'trainer');
+    const isTrainer = u.userRoles.some((r) => r.role.key === 'trainer') || !!u.staffProfile;
     const isMember = u.userRoles.length > 0 && u.userRoles.every((r) => r.role.key === 'member');
     if (isOwner || isRecep || isMember) { console.log(`KEEP     ${u.email} [${keys.join(', ')}]`); continue; }
     if (isTrainer) {

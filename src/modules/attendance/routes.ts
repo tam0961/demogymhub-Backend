@@ -140,19 +140,23 @@ attendancePublicRouter.post('/hikvision/:key', express.raw({ type: () => true, l
     return;
   }
   await prisma.staffDevice.update({ where: { id: device.id }, data: { lastSeenAt: new Date() } });
+  if (device.paused) {
+    res.json({ status: 'paused' });
+    return;
+  }
   const parsed = parseHikvision(req.body);
   if (parsed) await routeScan(device, parsed);
   res.json({ status: 'ok' });
 });
 
 attendancePublicRouter.get('/ping/:key', async (req, res) => {
-  const device = await prisma.staffDevice.findUnique({ where: { deviceKey: String(req.params.key) }, select: { id: true } });
+  const device = await prisma.staffDevice.findUnique({ where: { deviceKey: String(req.params.key) }, select: { id: true, paused: true } });
   if (!device) {
     res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Unknown device' } });
     return;
   }
   await prisma.staffDevice.update({ where: { id: device.id }, data: { lastSeenAt: new Date() } });
-  res.json({ status: 'ok' });
+  res.json({ status: 'ok', paused: device.paused });
 });
 
 attendancePublicRouter.get('/jobs/:key', async (req, res) => {
@@ -162,6 +166,10 @@ attendancePublicRouter.get('/jobs/:key', async (req, res) => {
     return;
   }
   await prisma.staffDevice.update({ where: { id: device.id }, data: { lastSeenAt: new Date() } });
+  if (device.paused) {
+    res.json({ data: [], paused: true });
+    return;
+  }
   const stale = new Date(Date.now() - 3 * 60_000);
   const jobs = await prisma.faceJob.findMany({
     where: { deviceId: device.id, OR: [{ status: 'pending' }, { status: 'claimed', claimedAt: { lt: stale } }] },
@@ -183,7 +191,7 @@ attendancePublicRouter.get('/jobs/:key', async (req, res) => {
       photo: photo ? Buffer.from(photo.data).toString('base64') : null,
     });
   }
-  res.json({ data: out });
+  res.json({ data: out, paused: false });
 });
 
 attendancePublicRouter.post('/jobs/:key/done', express.json(), async (req, res) => {
@@ -201,6 +209,10 @@ attendancePublicRouter.post('/facepush/:key', async (req, res) => {
   const device = await prisma.staffDevice.findUnique({ where: { deviceKey: String(req.params.key) } });
   if (!device) {
     res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Unknown device' } });
+    return;
+  }
+  if (device.paused) {
+    res.json({ data: { result: 'paused' } });
     return;
   }
   const b = z.object({ employee_no: z.string().trim().min(1).max(40), photo: z.string().max(280_000).optional() }).parse(req.body);
@@ -300,9 +312,10 @@ attendanceRouter.get('/scans', authorize('checkins.read'), async (req, res) => {
       },
     });
   }
-  const devices = await prisma.staffDevice.findMany({ where: bf, select: { lastSeenAt: true } });
+  const devices = await prisma.staffDevice.findMany({ where: bf, select: { lastSeenAt: true, paused: true } });
+  const paused = devices.length ? devices.every((d) => d.paused) : null;
   const bridgeOk = devices.length ? devices.some((d) => d.lastSeenAt && Date.now() - d.lastSeenAt.getTime() < 90_000) : null;
-  res.json({ data: { now: now.toISOString(), items, bridge_ok: bridgeOk } });
+  res.json({ data: { now: now.toISOString(), items, bridge_ok: bridgeOk, paused } });
 });
 
 attendanceRouter.post('/face-jobs', authorize('members.update'), async (req, res) => {
@@ -345,6 +358,7 @@ attendanceRouter.get('/devices', authorize('devices.manage'), async (req, res) =
       branch_name: d.branch.name,
       device_key: d.deviceKey,
       last_seen_at: d.lastSeenAt?.toISOString() ?? null,
+      paused: d.paused,
     })),
   });
 });
@@ -355,6 +369,16 @@ attendanceRouter.post('/devices', authorize('devices.manage'), async (req, res) 
   const d = await prisma.staffDevice.create({ data: { name: b.name, branchId, deviceKey: randomBytes(16).toString('hex') } });
   await audit(req.auth!.userId, 'attendance.device_created', { device_id: d.id, name: d.name }, req.ip, d.id);
   res.status(201).json({ data: { id: d.id, name: d.name, branch_id: d.branchId, device_key: d.deviceKey, last_seen_at: null } });
+});
+
+attendanceRouter.put('/devices/:id/pause', authorize('devices.manage'), async (req, res) => {
+  const id = uuid.parse(req.params.id);
+  const b = z.object({ paused: z.boolean() }).parse(req.body);
+  const d = await prisma.staffDevice.findUnique({ where: { id } });
+  if (!d || !branchAllowed(req.access!, d.branchId)) throw notFound('Device not found');
+  await prisma.staffDevice.update({ where: { id }, data: { paused: b.paused } });
+  await audit(req.auth!.userId, b.paused ? 'attendance.device_paused' : 'attendance.device_resumed', { device_id: id, name: d.name }, req.ip, id);
+  res.json({ data: { id, paused: b.paused } });
 });
 
 attendanceRouter.delete('/devices/:id', authorize('devices.manage'), async (req, res) => {

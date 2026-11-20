@@ -179,7 +179,19 @@ export async function runReminders(now = new Date()) {
   }
   if (t.h === 7 && (await once(`today:${t.date}`))) {
     const trainers = await branchTrainers(cfg.branchId);
-    const list = trainers.map((p, i) => `${i + 1}/ ${p.name} :`).join('\n');
+    const day = dayRange(t.date);
+    const offIds = new Set((await prisma.ptDayOff.findMany({ where: { branchId: cfg.branchId, date: dateOnly(t.date) }, select: { trainerId: true } })).map((o) => o.trainerId));
+    const classes = await prisma.groupClass.findMany({ where: { branchId: cfg.branchId, status: { not: 'cancelled' }, startAt: { gte: day.gte, lt: day.lt } }, orderBy: { startAt: 'asc' }, select: { trainerId: true, startAt: true } });
+    const hm = (d: Date) => {
+      const p = vnParts(d);
+      return p.mi ? `${p.h}h${String(p.mi).padStart(2, '0')}` : `${p.h}h`;
+    };
+    const list = trainers
+      .map((p, i) => {
+        const fill = offIds.has(p.id) ? 'Off' : classes.filter((c) => c.trainerId === p.id).map((c) => `${hm(c.startAt)} (Nhóm)`).join(' ');
+        return `${i + 1}/ ${p.name} :${fill ? ` ${fill}` : ''}`;
+      })
+      .join('\n');
     await say(`Anh Chị PT báo ca hôm nay giúp e ạ\n🍀 CA DẠY HÔM NAY 🍀\n${list}\n\nNhớ gõ @ rồi chọn "${cfg.botName}" để bot đọc được.`);
   }
   if (t.h === 8 && (await once(`chk:${t.date}`))) {

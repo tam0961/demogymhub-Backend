@@ -177,3 +177,25 @@ describe('bridge heartbeat', () => {
   });
 });
 
+describe('pausing the device connection', () => {
+  it('ignores scans, hands out no jobs and reports paused while paused, and resumes', async () => {
+    const dev = await prisma.staffDevice.findFirstOrThrow({ where: { deviceKey: key } });
+    const paused = await request(app).put(`/api/attendance/devices/${dev.id}/pause`).set(h()).send({ paused: true });
+    expect(paused.status).toBe(200);
+    const before = await prisma.faceEvent.count({ where: { branchId: A } });
+    expect((await scan('PAUSED-1')).body.status).toBe('paused');
+    expect(await prisma.faceEvent.count({ where: { branchId: A } })).toBe(before);
+    const jobs = await request(app).get(`/api/public/attendance/jobs/${key}`);
+    expect(jobs.body).toEqual({ data: [], paused: true });
+    expect((await request(app).get(`/api/public/attendance/ping/${key}`)).body.paused).toBe(true);
+    const feed = await request(app).get('/api/attendance/scans').query({ since: new Date().toISOString() }).set(h());
+    expect(feed.body.data.paused).toBe(true);
+    const list = await request(app).get('/api/attendance/devices').set(h());
+    expect(list.body.data.find((d: { id: string }) => d.id === dev.id).paused).toBe(true);
+
+    expect((await request(app).put(`/api/attendance/devices/${dev.id}/pause`).set(h()).send({ paused: false })).status).toBe(200);
+    expect((await scan('RESUMED-1')).body.status).toBe('ok');
+    expect((await request(app).get(`/api/public/attendance/ping/${key}`)).body.paused).toBe(false);
+  });
+});
+
