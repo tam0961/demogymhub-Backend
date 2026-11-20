@@ -8,6 +8,7 @@ import { authenticate, authorize } from '../../middlewares/auth';
 import { POSITIONS, TAX_MODES, sumRows, type PayrollRow } from './calc';
 import { computePtStats } from './ptstats';
 import { computePreview, getPayrollSettings, savePayrollSettings } from './service';
+import { currentMonthVN, readSnapshot, refreshSnapshots } from './snapshot';
 
 export const payrollRouter = Router();
 payrollRouter.use(authenticate);
@@ -125,12 +126,26 @@ payrollRouter.get('/preview', authorize('payroll.read'), async (req, res) => {
     }
     return res.json({ data: { month: q.month, status: 'closed', rows, totals: sumRows(rows) } });
   }
+  if (q.month === currentMonthVN()) {
+    const snap = await readSnapshot('preview', q.month, q.branch_id);
+    return res.json({ data: { ...(snap.data as object), updated_at: snap.updated_at } });
+  }
   res.json({ data: await computePreview(q.month, q.branch_id) });
 });
 
 payrollRouter.get('/pt-stats', authorize('payroll.read'), async (req, res) => {
   const q = z.object({ month, branch_id: uuid.optional() }).parse(req.query);
+  if (q.month === currentMonthVN()) {
+    const snap = await readSnapshot('ptstats', q.month, q.branch_id);
+    return res.json({ data: { ...(snap.data as object), updated_at: snap.updated_at } });
+  }
   res.json({ data: await computePtStats(q.month, q.branch_id) });
+});
+
+payrollRouter.post('/refresh', authorize('payroll.manage'), async (req, res) => {
+  const b = z.object({ month }).parse(req.body);
+  if (b.month === currentMonthVN()) await refreshSnapshots(b.month);
+  res.json({ data: { month: b.month, refreshed: b.month === currentMonthVN() } });
 });
 
 payrollRouter.put('/adjustments', authorize('payroll.manage'), async (req, res) => {
@@ -143,6 +158,7 @@ payrollRouter.put('/adjustments', authorize('payroll.manage'), async (req, res) 
     update: { penalty: b.penalty, adjustment: b.adjustment, note: b.note ?? null },
     create: { userId: b.user_id, month: b.month, penalty: b.penalty, adjustment: b.adjustment, note: b.note ?? null },
   });
+  if (b.month === currentMonthVN()) await refreshSnapshots(b.month);
   await audit(req.auth!.userId, 'payroll.adjustment_saved', { user_id: b.user_id, month: b.month, penalty: b.penalty, adjustment: b.adjustment }, req.ip, b.user_id);
   res.json({ data: { user_id: a.userId, month: a.month, penalty: a.penalty, adjustment: a.adjustment, note: a.note } });
 });
