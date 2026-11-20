@@ -90,7 +90,7 @@ export interface Preview {
   totals: Record<string, number | boolean>;
 }
 
-export async function computePreview(month: string, branchId?: string): Promise<Preview> {
+export async function computePreview(month: string, branchId?: string, out?: { sessionPayByKey: Map<string, number> }): Promise<Preview> {
   const settings = await getPayrollSettings();
   const { from, to } = monthRange(month);
 
@@ -150,6 +150,7 @@ export async function computePreview(month: string, branchId?: string): Promise<
       const rate = flatRate(rev.ptByAttr.get(c.ptUserId ?? trainerId) ?? 0, settings.ptTiers);
       const perSession = (settings.ptSessionShare * (rate / 100) * (paidToDate.get(cid) ?? 0)) / c.sessionsTotal!;
       add(sessionPay, trainerId, perSession * n);
+      out?.sessionPayByKey.set(`${trainerId}|${cid}`, perSession * n);
       add(sessionCount, trainerId, n);
     }
   }

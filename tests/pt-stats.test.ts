@@ -79,6 +79,9 @@ describe('payroll pt-stats', () => {
     const pf = pv.body.data.rows.find((x: { user_id: string }) => x.user_id === ids.ptFull);
     const pp = pv.body.data.rows.find((x: { user_id: string }) => x.user_id === ids.ptPart);
     expect(pf.pt_sales).toBe(full.pt_sales);
+    expect((full as unknown as { session_pay: number }).session_pay).toBe(pf.pt_session_pay);
+    expect((full as unknown as { group_pay: number }).group_pay).toBe(pf.group_pay);
+    expect((full.clients[0] as { session_pay: number }).session_pay).toBe(pf.pt_session_pay);
     expect(pp.member_sales).toBe(part.member_sales);
   });
 

@@ -1,7 +1,7 @@
 import type { PackageCategory } from '@prisma/client';
 import { fmtDate } from '../../lib/dates';
 import { prisma } from '../../lib/prisma';
-import { contribution, inRangeWhere, monthRange } from './service';
+import { computePreview, contribution, getPayrollSettings, inRangeWhere, monthRange } from './service';
 
 const PT_CATEGORIES: PackageCategory[] = ['pt_1on1', 'pt_1on2'];
 const PT_POSITIONS = ['pt_fulltime', 'pt_parttime'];
@@ -16,6 +16,7 @@ export interface PtStatClient {
   sessions_total: number | null;
   sessions_left: number | null;
   taught_in_month: number;
+  session_pay: number;
   end_date: string | null;
 }
 
@@ -41,6 +42,9 @@ export interface PtStatRow {
   clients: PtStatClient[];
   sessions_taught: number;
   group_classes: number;
+  class_rate: number;
+  group_pay: number;
+  session_pay: number;
   classes: PtStatClass[];
   member_sales: number;
   pt_sales: number;
@@ -56,6 +60,9 @@ const add = (m: Map<string, number>, k: string, v: number) => m.set(k, (m.get(k)
 
 export async function computePtStats(month: string, branchId?: string): Promise<PtStats> {
   const { from, to } = monthRange(month);
+  const settings = await getPayrollSettings();
+  const payOut = { sessionPayByKey: new Map<string, number>() };
+  await computePreview(month, branchId, payOut);
   const profiles = await prisma.payrollProfile.findMany({
     where: {
       active: true,
@@ -138,6 +145,7 @@ export async function computePtStats(month: string, branchId?: string): Promise<
         sessions_total: c.sessionsTotal,
         sessions_left: c.sessionsLeft,
         taught_in_month: taughtByContract.get(`${p.userId}|${c.id}`) ?? 0,
+        session_pay: Math.round(payOut.sessionPayByKey.get(`${p.userId}|${c.id}`) ?? 0),
         end_date: fmtDate(c.endDate),
       }));
     const myClasses = classes.filter((c) => c.trainerId === p.userId).map((c) => ({ id: c.id, title: c.title, start_at: c.startAt.toISOString() }));
@@ -152,6 +160,9 @@ export async function computePtStats(month: string, branchId?: string): Promise<
       clients,
       sessions_taught: taughtByPt.get(p.userId) ?? 0,
       group_classes: myClasses.length,
+      class_rate: settings.classRate,
+      group_pay: myClasses.length * settings.classRate,
+      session_pay: Math.round([...payOut.sessionPayByKey].filter(([k]) => k.startsWith(`${p.userId}|`)).reduce((a, [, v]) => a + v, 0)),
       classes: myClasses,
       member_sales: sales.filter((s) => s.kind === 'member').reduce((a, s) => a + s.amount, 0),
       pt_sales: sales.filter((s) => s.kind === 'pt').reduce((a, s) => a + s.amount, 0),
