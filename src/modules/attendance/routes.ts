@@ -287,11 +287,14 @@ attendanceRouter.get('/scans', authorize('checkins.read'), async (req, res) => {
     const photo = await prisma.memberPhoto.findUnique({ where: { memberId: m.id }, select: { updatedAt: true } });
     const contracts = await prisma.contract.findMany({
       where: { memberId: m.id, status: { notIn: ['draft', 'cancelled'] } },
-      select: { status: true, totalAmount: true, paidAmount: true, endDate: true, startDate: true, sessionsTotal: true, sessionsLeft: true, package: { select: { name: true, category: true } }, packageName: true },
+      select: { id: true, code: true, status: true, totalAmount: true, paidAmount: true, endDate: true, startDate: true, sessionsTotal: true, sessionsLeft: true, package: { select: { name: true, category: true, checkinBefore: true } }, packageName: true },
       orderBy: [{ endDate: { sort: 'desc', nulls: 'first' } }],
     });
     const mc = contracts.find((c) => c.package.category === 'member');
     const debt = contracts.reduce((a, c) => a + Math.max(c.totalAmount - c.paidAmount, 0), 0);
+    const debtC = contracts.filter((c) => c.totalAmount > c.paidAmount).sort((a, b) => b.totalAmount - b.paidAmount - (a.totalAmount - a.paidAmount))[0];
+    const ptC = contracts.find((c) => c.package.category !== 'member' && c.sessionsTotal != null && c.status !== 'expired');
+    const branch = await prisma.branch.findUnique({ where: { id: e.branchId }, select: { code: true, name: true } });
     const endStr = mc?.endDate ? mc.endDate.toISOString().slice(0, 10) : null;
     const state = !mc ? 'no_package' : mc.status === 'frozen' ? 'frozen' : mc.status === 'expired' || (endStr && endStr < todayStr) ? 'expired' : mc.startDate && mc.startDate.toISOString().slice(0, 10) > todayStr ? 'not_started' : 'ok';
     items.push({
@@ -309,6 +312,11 @@ attendanceRouter.get('/scans', authorize('checkins.read'), async (req, res) => {
         state,
         sessions_left: mc?.sessionsTotal != null ? mc.sessionsLeft : null,
         debt,
+        branch,
+        contract_id: mc?.id ?? null,
+        checkin_before: mc?.package.checkinBefore ?? null,
+        debt_contract: debtC ? { id: debtC.id, code: debtC.code, amount: debtC.totalAmount - debtC.paidAmount } : null,
+        pt: ptC ? { package_name: ptC.packageName ?? ptC.package.name, sessions_left: ptC.sessionsLeft, sessions_total: ptC.sessionsTotal } : null,
       },
     });
   }
