@@ -6,6 +6,7 @@ import { conflict, notFound } from '../../lib/errors';
 import { prisma } from '../../lib/prisma';
 import { authenticate, authorize } from '../../middlewares/auth';
 import { POSITIONS, TAX_MODES, sumRows, type PayrollRow } from './calc';
+import { computePtStats } from './ptstats';
 import { computePreview, getPayrollSettings, savePayrollSettings } from './service';
 
 export const payrollRouter = Router();
@@ -125,6 +126,11 @@ payrollRouter.get('/preview', authorize('payroll.read'), async (req, res) => {
     return res.json({ data: { month: q.month, status: 'closed', rows, totals: sumRows(rows) } });
   }
   res.json({ data: await computePreview(q.month, q.branch_id) });
+});
+
+payrollRouter.get('/pt-stats', authorize('payroll.read'), async (req, res) => {
+  const q = z.object({ month, branch_id: uuid.optional() }).parse(req.query);
+  res.json({ data: await computePtStats(q.month, q.branch_id) });
 });
 
 payrollRouter.put('/adjustments', authorize('payroll.manage'), async (req, res) => {
