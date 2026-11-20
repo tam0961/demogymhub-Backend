@@ -4,6 +4,7 @@ import { prisma } from '../../lib/prisma';
 import { redis } from '../../lib/redis';
 import { applyShiftMessage, branchTrainers } from '../pt/shift-message';
 import { cleanName, fmtDM, lastWord } from '../pt/zalo-shift';
+import { handleCleanText, runCleanReminders } from './clean';
 import { getBotCfg, getBotState, patchBotState, type BotCfg } from './config';
 
 const API = 'https://bot-api.zaloplatforms.com';
@@ -128,6 +129,12 @@ export async function handleUpdate(cfg: BotCfg, it: Update) {
   const state = await getBotState();
   const seen = [{ id: chatId, type: String(m.chat.chat_type ?? ''), name: m.chat.title ?? m.chat.display_name ?? m.from?.display_name ?? '', at: new Date().toISOString() }, ...state.chats.filter((c) => c.id !== chatId)].slice(0, 20);
   await patchBotState({ chats: seen, lastItemAt: new Date().toISOString() });
+  if (m.text && !m.from?.is_bot && cfg.cleanOn && cfg.cleanGroup && chatId === cfg.cleanGroup) {
+    const when = m.date ? new Date(m.date * (m.date < 1e12 ? 1000 : 1)) : new Date();
+    const by = String(m.from?.display_name ?? 'Nhân viên').slice(0, 40);
+    await handleCleanText(cfg, { say: (x) => sendText(cfg, cfg.cleanGroup, x), once }, m.text.replace(MENTION, ' '), by, vnParts(when));
+    return;
+  }
   if (!m.text || m.from?.is_bot || !cfg.ptGroup || chatId !== cfg.ptGroup || !cfg.branchId) return;
   const reply = await handleGroupText(cfg, m.text, m.date ? new Date(m.date * (m.date < 1e12 ? 1000 : 1)) : new Date());
   if (reply) await sendText(cfg, cfg.ptGroup, reply);
@@ -206,6 +213,11 @@ export async function runReminders(now = new Date()) {
   }
 }
 
+export async function runCleanTick(now = new Date()) {
+  const cfg = await getBotCfg();
+  await runCleanReminders(cfg, { say: (x) => sendText(cfg, cfg.cleanGroup, x), once }, vnParts(now));
+}
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const LOCK = 'zbot:lock';
 
@@ -264,6 +276,7 @@ export function startZaloBot() {
   })();
   const timer = setInterval(() => {
     runReminders().catch((e) => logger.error({ err: e }, 'zalo bot reminders failed'));
+    runCleanTick().catch((e) => logger.error({ err: e }, 'zalo bot clean reminders failed'));
     void prisma.botSent.deleteMany({ where: { at: { lt: new Date(Date.now() - 120 * 86400000) } } }).catch(() => undefined);
   }, 60_000);
   timer.unref();

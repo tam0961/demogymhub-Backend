@@ -4,7 +4,7 @@ import { audit } from '../../lib/audit';
 import { badRequest } from '../../lib/errors';
 import { prisma } from '../../lib/prisma';
 import { authenticate, authorize } from '../../middlewares/auth';
-import { getBotCfg, getBotState, publicBotCfg, saveBotCfg, parseWindows } from '../zalobot/config';
+import { CLEAN_TPL_KEYS, getBotCfg, getBotState, publicBotCfg, saveBotCfg, parseWindows, type CleanTplKey } from '../zalobot/config';
 import { sendText, zaloApi } from '../zalobot/service';
 import { branchAllowed } from '../rbac/service';
 import { getZns, publicZns, saveZns, sendZns, sendExpiryReminders, SAMPLE_VARS, ZNS_EVENTS } from './service';
@@ -80,6 +80,9 @@ const botSchema = z.object({
   branch_id: z.union([z.string().uuid(), z.literal('')]),
   group_trainer: z.string().trim().max(60),
   group_windows: z.string().trim().max(100),
+  clean_on: z.boolean().optional(),
+  clean_group: z.string().trim().max(100).optional(),
+  clean_tpl: z.record(z.string(), z.string().max(2000)).optional(),
 });
 
 zaloRouter.get('/bot/config', async (_req, res) => {
@@ -94,6 +97,16 @@ zaloRouter.put('/bot/config', async (req, res) => {
   if (b.token) cfg.token = b.token;
   if (b.enabled && (!cfg.token || !b.pt_group || !b.branch_id)) throw badRequest('BOT_INCOMPLETE', 'Token, PT group and branch are required to turn the bot on');
   Object.assign(cfg, { enabled: b.enabled, botName: b.bot_name, ptGroup: b.pt_group, branchId: b.branch_id, groupTrainer: b.group_trainer, groupWindows: b.group_windows });
+  if (b.clean_group !== undefined) cfg.cleanGroup = b.clean_group;
+  if (b.clean_on !== undefined) {
+    if (b.clean_on && (!cfg.token || !cfg.cleanGroup)) throw badRequest('CLEAN_INCOMPLETE', 'Token and cleaning group are required to turn the cleaning bot on');
+    cfg.cleanOn = b.clean_on;
+  }
+  if (b.clean_tpl) {
+    const tpl: Partial<Record<CleanTplKey, string>> = {};
+    for (const k of CLEAN_TPL_KEYS) if (typeof b.clean_tpl[k] === 'string') tpl[k] = b.clean_tpl[k];
+    cfg.cleanTpl = tpl;
+  }
   await saveBotCfg(cfg);
   await audit(req.auth!.userId, 'zalo_bot.config_updated', { enabled: cfg.enabled, pt_group: cfg.ptGroup, branch_id: cfg.branchId }, req.ip);
   res.json({ data: { ...publicBotCfg(cfg), state: await getBotState() } });
@@ -103,6 +116,13 @@ zaloRouter.post('/bot/check', async (_req, res) => {
   const cfg = await getBotCfg();
   if (!cfg.token) throw badRequest('TOKEN_REQUIRED', 'Enter the bot token first');
   const r = await zaloApi(cfg.token, 'getMe');
+  res.json({ data: { ok: !!r?.ok, message: r ? (r.ok ? 'ok' : String(r.description ?? r.error_code ?? 'error')) : 'Không kết nối được Zalo' } });
+});
+
+zaloRouter.post('/bot/send-test-clean', async (_req, res) => {
+  const cfg = await getBotCfg();
+  if (!cfg.token || !cfg.cleanGroup) throw badRequest('BOT_INCOMPLETE', 'Token and cleaning group are required');
+  const r = await sendText(cfg, cfg.cleanGroup, 'Bot vệ sinh đã kết nối với DemoGym. Tin thử, anh chị có thể bỏ qua ạ.');
   res.json({ data: { ok: !!r?.ok, message: r ? (r.ok ? 'ok' : String(r.description ?? r.error_code ?? 'error')) : 'Không kết nối được Zalo' } });
 });
 
