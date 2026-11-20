@@ -44,6 +44,7 @@ describe('GET /reports/business', () => {
     expect(d.cards.member_active.spark).toHaveLength(14);
     expect(d.health.parts).toHaveLength(4);
     expect(d.health.score).toBeLessThanOrEqual(100);
+    expect(['Rất tốt', 'Tốt', 'Trung bình', 'Cần cải thiện']).toContain(d.health.grade);
     expect(d.alerts.expiring_30.count).toBeGreaterThanOrEqual(1);
     expect(d.alerts.debt.impact).toBeGreaterThanOrEqual(1000000);
     expect(d.recent_contracts.length).toBeGreaterThan(0);

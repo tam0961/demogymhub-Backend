@@ -24,8 +24,7 @@ async function renewalStats(bf: ReturnType<typeof branchFilter>, today: Date) {
   return { rate: denom > 0 ? renewals / denom : null, expired };
 }
 
-statsRouter.get('/health', authorize('reports.view'), async (req, res) => {
-  const bf = branchFilter(req, q.parse(req.query).branch_id);
+export async function computeHealth(bf: ReturnType<typeof branchFilter>) {
   const today = dateOnly(todayVN());
   const until = dayRange(fmtDay(today)).lt;
   const since30 = dayRange(fmtDay(addDays(today, -29))).gte;
@@ -55,7 +54,11 @@ statsRouter.get('/health', authorize('reports.view'), async (req, res) => {
     { key: 'operations', label: 'Vận hành', score: r1(25 * opsRatio) },
   ];
   const score = Math.round(parts.reduce((s, p) => s + p.score, 0));
-  res.json({ data: { score, grade: gradeOf(score), parts, renew_rate: renew.rate, renew_rate_used: renewRate } });
+  return { score, grade: gradeOf(score), parts, renew_rate: renew.rate, renew_rate_used: renewRate };
+}
+
+statsRouter.get('/health', authorize('reports.view'), async (req, res) => {
+  res.json({ data: await computeHealth(branchFilter(req, q.parse(req.query).branch_id)) });
 });
 
 statsRouter.get('/alerts', authorize('reports.view'), async (req, res) => {

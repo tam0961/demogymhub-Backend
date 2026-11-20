@@ -6,7 +6,7 @@ import { prisma } from '../../lib/prisma';
 import { authenticate, authorize, authorizeAny } from '../../middlewares/auth';
 import { paymentToApi } from '../contracts/service';
 import { branchFilter } from '../rbac/scope';
-import { statsRouter } from './stats';
+import { computeHealth, statsRouter } from './stats';
 
 export const reportsRouter = Router();
 reportsRouter.use(authenticate);
@@ -314,7 +314,6 @@ const businessQ = z.object({
 
 type Kind = 'member' | 'pt' | 'group';
 const kindOf = (p: { category: string; displayGroup: string | null }): Kind => (p.displayGroup === 'pt_group' || p.category === 'pt_group' ? 'group' : p.category === 'member' ? 'member' : 'pt');
-const clamp25 = (x: number) => Math.max(0, Math.min(25, Math.round(x * 25)));
 const fmtDay = (d: Date) => d.toISOString().slice(0, 10);
 
 reportsRouter.get('/business', authorize('reports.view'), async (req, res) => {
@@ -383,17 +382,9 @@ reportsRouter.get('/business', authorize('reports.view'), async (req, res) => {
     pt_active: { total: ptActive.length, members: new Set(ptActive.map((c) => c.memberId)).size, by_branch: byBranch(ptActive), spark: countPerDay(past14, ptDone14.map((s) => vnDayOf(s.startAt))) },
   };
 
-  const since30 = dayRange(fmtDay(addDays(today, -29))).gte;
-  const since120 = dayRange(fmtDay(addDays(today, -119))).gte;
-  const since90 = dayRange(fmtDay(addDays(today, -89))).gte;
-  const until = dayRange(todayStr).lt;
-  const [pay120, refund120, activeContracts, memberTotals, expiredWindow, creditRows, openRows, refundReq, recent, activityCheckins, activityPays, activityLeads, debtRows] = await Promise.all([
-    prisma.payment.findMany({ where: { ...bf, status: { in: ['confirmed', 'refunded'] }, confirmedAt: { gte: since120, lt: until } }, select: { amount: true, confirmedAt: true } }),
-    prisma.payment.findMany({ where: { ...bf, status: 'refunded', refundedAt: { gte: since120, lt: until } }, select: { amount: true, refundedAt: true } }),
+  const [activeContracts, expiredWindow, openRows, refundReq, recent, activityCheckins, activityPays, activityLeads, debtRows] = await Promise.all([
     prisma.contract.findMany({ where: { ...bf, status: 'active' }, select: { packageName: true, packageId: true, package: { select: { name: true } } } }),
-    prisma.member.groupBy({ by: ['status'], where: bf, _count: { _all: true } }),
     prisma.contract.findMany({ where: { ...bf, status: { in: ['active', 'expired'] }, package: { category: 'member' }, endDate: { gte: addDays(today, -90), lt: today } }, select: { id: true } }),
-    prisma.contract.findMany({ where: { ...bf, status: { notIn: ['cancelled', 'draft'] }, createdAt: { gte: since90 } }, select: { totalAmount: true, paidAmount: true } }),
     prisma.contract.findMany({ where: { ...bf, status: { in: ['draft', 'signed'] } }, select: { totalAmount: true } }),
     prisma.payment.findMany({ where: { ...bf, status: 'confirmed', refundRequestedAt: { not: null } }, select: { amount: true } }),
     prisma.contract.findMany({
@@ -407,27 +398,9 @@ reportsRouter.get('/business', authorize('reports.view'), async (req, res) => {
     prisma.lead.findMany({ where: bf, orderBy: { createdAt: 'desc' }, take: 8, select: { name: true, createdAt: true } }),
     prisma.contract.findMany({ where: { ...bf, status: { notIn: ['cancelled', 'draft'] } }, select: { totalAmount: true, paidAmount: true } }),
   ]);
-  const net = (a: Date, b: Date) =>
-    pay120.filter((x) => x.confirmedAt! >= a && x.confirmedAt! < b).reduce((s, x) => s + x.amount, 0) - refund120.filter((x) => x.refundedAt! >= a && x.refundedAt! < b).reduce((s, x) => s + x.amount, 0);
-  const cur30 = net(since30, until);
-  const prior = net(since120, since30) / 3;
-  const revRatio = prior > 0 ? Math.min(1, cur30 / prior) : cur30 > 0 ? 1 : 0;
-  const totalMembers = memberTotals.reduce((s, g) => s + g._count._all, 0);
-  const validMembers = memberTotals.filter((g) => g.status === 'active').reduce((s, g) => s + g._count._all, 0);
-  const validRate = totalMembers ? validMembers / totalMembers : 0;
   const renewed = expiredWindow.length ? new Set((await prisma.contract.findMany({ where: { renewedFromId: { in: expiredWindow.map((c) => c.id) } }, select: { renewedFromId: true } })).map((c) => c.renewedFromId)) : new Set<string | null>();
   const renewRate = expiredWindow.length ? expiredWindow.filter((c) => renewed.has(c.id)).length / expiredWindow.length : null;
-  const memberScore = renewRate == null ? validRate : validRate * 0.5 + renewRate * 0.5;
-  const creditTotal = creditRows.reduce((s, c) => s + c.totalAmount, 0);
-  const collectRate = creditTotal > 0 ? Math.min(1, creditRows.reduce((s, c) => s + c.paidAmount, 0) / creditTotal) : 0;
-  const attendRate = cards.member_active.total ? Math.min(1, new Set(checkins14.map((c) => c.memberId)).size / cards.member_active.total) : 0;
-  const parts = [
-    { key: 'revenue', label: 'Doanh thu', score: clamp25(revRatio) },
-    { key: 'members', label: 'Hội viên', score: clamp25(memberScore) },
-    { key: 'collection', label: 'Thu tiền', score: clamp25(collectRate) },
-    { key: 'attendance', label: 'Vận hành', score: clamp25(attendRate) },
-  ];
-  const health = { score: parts.reduce((s, x) => s + x.score, 0), parts };
+  const health = await computeHealth(bf);
 
   const debtors = debtRows.filter((c) => c.totalAmount > c.paidAmount);
   const alerts = {
