@@ -30,6 +30,8 @@ const settingsSchema = z
     ptSessionShare: z.number().min(0).max(1),
     classRate: z.number().int().min(0),
     insuranceRate: z.number().min(0).max(100),
+    insuranceBase: z.number().int().min(0).nullable().default(5_500_000),
+    fixedTax: z.number().int().min(0).default(0),
     partTimeTaxRate: z.number().min(0).max(100),
     taxBrackets: tiers(true),
     personalDeduction: z.number().int().min(0).nullable(),

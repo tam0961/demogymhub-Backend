@@ -11,6 +11,8 @@ export interface PayrollSettings {
   ptSessionShare: number;
   classRate: number;
   insuranceRate: number;
+  insuranceBase: number | null;
+  fixedTax: number;
   partTimeTaxRate: number;
   taxBrackets: Tier[];
   personalDeduction: number | null;
@@ -41,8 +43,11 @@ export const DEFAULT_SETTINGS: PayrollSettings = {
   ptSessionShare: 0.6,
   classRate: 100_000,
   insuranceRate: 10.5,
+  // Bảng 5: insurance is charged on a fixed base (5.5tr), not on the actual base salary. null = use the profile base salary.
+  insuranceBase: 5_500_000,
+  // Bảng 5: with no brackets, the 'progressive' tax mode deducts this fixed amount (default 0, no deductions).
+  fixedTax: 0,
   partTimeTaxRate: 10,
-  // Progressive personal income tax is NOT confirmed by the owner yet: no brackets, no deductions.
   taxBrackets: [],
   personalDeduction: null,
   dependentDeduction: null,
@@ -161,13 +166,13 @@ export function computeRow(i: RowInput, s: PayrollSettings): PayrollRow {
   const groupPay = groupClasses * s.classRate;
 
   const gross = base + memberCommission + marketingCommission + ptImmediate + ptSessionPay + groupPay;
-  const insurance = i.profile.hasInsurance ? Math.round((base * s.insuranceRate) / 100) : 0;
+  const insurance = i.profile.hasInsurance ? Math.round(((s.insuranceBase ?? base) * s.insuranceRate) / 100) : 0;
 
   let tax = 0;
-  let taxPending = false;
+  const taxPending = false;
   if (i.profile.taxMode === 'flat10') tax = Math.round((gross * s.partTimeTaxRate) / 100);
   else if (i.profile.taxMode === 'progressive') {
-    if (!s.taxBrackets.length) taxPending = true;
+    if (!s.taxBrackets.length) tax = Math.max(0, Math.round(s.fixedTax));
     else {
       const taxable = Math.max(0, gross - insurance - (s.personalDeduction ?? 0) - i.profile.dependents * (s.dependentDeduction ?? 0));
       tax = marginal(taxable, s.taxBrackets);
@@ -197,7 +202,7 @@ export function computeRow(i: RowInput, s: PayrollSettings): PayrollRow {
     penalty: i.penalty,
     adjustment: i.adjustment,
     net,
-    note: i.note ?? (taxPending ? 'Chờ xác nhận biểu thuế lũy tiến' : null),
+    note: i.note ?? null,
   };
 }
 

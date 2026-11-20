@@ -90,6 +90,14 @@ describe('payroll calculation (pure)', () => {
     expect([flatRate(0, t), flatRate(29_999_999, t), flatRate(30_000_000, t), flatRate(49_999_999, t), flatRate(50_000_000, t), flatRate(64_999_999, t), flatRate(65_000_000, t), flatRate(90_000_000, t)]).toEqual([0, 25, 27, 27, 30, 30, 35, 35]);
   });
 
+  it('progressive mode without brackets deducts the fixed tax amount', () => {
+    const s = { ...DEFAULT_SETTINGS, fixedTax: 300_000 };
+    const r = computeRow({ userId: 'u', name: 'U', profile: { position: 'pt_fulltime', baseSalary: 5_500_000, hasInsurance: true, taxMode: 'progressive', dependents: 0 }, memberSales: 0, gymMemberTotal: 0, ptSales: 0, ptSessionPay: 0, ptSessionsTaught: 0, groupClasses: 0, penalty: 0, adjustment: 0 }, s);
+    expect(r.insurance).toBe(577_500);
+    expect(r.tax).toBe(300_000);
+    expect(r.net).toBe(5_500_000 - 577_500 - 300_000);
+  });
+
   it('progressive tax uses the configured brackets and deductions', () => {
     const s = { ...DEFAULT_SETTINGS, taxBrackets: [{ upTo: 5_000_000, rate: 5 }, { upTo: null, rate: 10 }], personalDeduction: 2_000_000, dependentDeduction: 1_000_000 };
     const r = computeRow({ userId: 'u', name: 'U', profile: { position: 'pt_fulltime', baseSalary: 10_000_000, hasInsurance: false, taxMode: 'progressive', dependents: 1 }, memberSales: 0, gymMemberTotal: 0, ptSales: 0, ptSessionPay: 0, ptSessionsTaught: 0, groupClasses: 0, penalty: 0, adjustment: 0 }, s);
@@ -150,6 +158,8 @@ describe('payroll API', () => {
     expect(g.status).toBe(200);
     expect(g.body.data.classRate).toBe(100000);
     expect(g.body.data.taxBrackets).toEqual([]);
+    expect(g.body.data.insuranceBase).toBe(5_500_000);
+    expect(g.body.data.fixedTax).toBe(0);
     expect(g.body.data.memberTiers[0]).toEqual({ upTo: 15000000, rate: 1.5 });
     const same = await request(app).put('/api/payroll/settings').set(auth(owner)).send(g.body.data);
     expect(same.status).toBe(200);
@@ -167,7 +177,7 @@ describe('payroll API', () => {
     expect(r.body.data.some((x: { roles: string[] }) => x.roles.length === 1 && x.roles[0] === 'member')).toBe(false);
   });
 
-  it('computes the full-time PT: 40% now, 60% per taught session, group classes, insurance, tax pending', async () => {
+  it('computes the full-time PT: 40% now, 60% per taught session, group classes, insurance on fixed base, fixed tax 0', async () => {
     const r = await row('ptFull');
     expect(r.pt_sales).toBe(35_000_000);
     expect(r.pt_rate).toBe(27);
@@ -178,10 +188,10 @@ describe('payroll API', () => {
     expect(r.group_pay).toBe(200_000);
     expect(r.member_commission).toBe(0);
     expect(r.gross).toBe(10_000_000 + 3_780_000 + 1_701_000 + 200_000);
-    expect(r.insurance).toBe(1_050_000);
+    expect(r.insurance).toBe(577_500);
     expect(r.tax).toBe(0);
-    expect(r.tax_pending).toBe(true);
-    expect(r.net).toBe(15_681_000 - 1_050_000);
+    expect(r.tax_pending).toBe(false);
+    expect(r.net).toBe(15_681_000 - 577_500);
   });
 
   it('computes the part-time PT without insurance and with flat 10% tax', async () => {
@@ -206,7 +216,8 @@ describe('payroll API', () => {
     expect(r.pt_session_pay).toBe(0);
     expect(r.group_pay).toBe(0);
     expect(r.gross).toBe(8_000_000 + 150_000 + 435_000 + 1_000_000);
-    expect(r.tax_pending).toBe(true);
+    expect(r.insurance).toBe(577_500);
+    expect(r.tax_pending).toBe(false);
   });
 
   it('member commission uses thuc thu: payments minus refunds and negative payments', async () => {
@@ -221,7 +232,7 @@ describe('payroll API', () => {
     const adj = await request(app).put('/api/payroll/adjustments').set(auth(owner)).send({ user_id: ids.ptFull, month: MONTH, penalty: 100_000, adjustment: 50_000, note: 'tre 2 buoi' });
     expect(adj.status).toBe(200);
     const r = await row('ptFull');
-    expect(r.net).toBe(15_681_000 - 1_050_000 - 100_000 + 50_000);
+    expect(r.net).toBe(15_681_000 - 577_500 - 100_000 + 50_000);
     expect(r.note).toBe('tre 2 buoi');
 
     const close = await request(app).post('/api/payroll/close').set(auth(owner)).send({ month: MONTH });
