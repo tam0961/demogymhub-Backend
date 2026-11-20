@@ -9,12 +9,14 @@ export const newRef = () => `GH${crypto.randomBytes(5).toString('hex').toUpperCa
 
 export async function confirmPayment(paymentId: string, byUser: string | null, source: 'manual' | 'webhook', ip?: string) {
   const first = await prisma.payment.findUniqueOrThrow({ where: { id: paymentId } });
+  const contractId = first.contractId;
+  if (contractId === null) throw conflict('RETAIL_PAYMENT', 'Giao dịch vé lẻ không có hợp đồng');
   const result = await prisma.$transaction(async (tx) => {
-    await lockContract(tx, first.contractId);
+    await lockContract(tx, contractId);
     const p = await tx.payment.findUniqueOrThrow({ where: { id: paymentId } });
     if (p.status === 'confirmed') return { payment: p, replay: true };
     if (p.status !== 'pending') throw conflict('INVALID_STATE', `Cannot confirm a payment in status ${p.status}`);
-    const c = await tx.contract.findUniqueOrThrow({ where: { id: p.contractId } });
+    const c = await tx.contract.findUniqueOrThrow({ where: { id: contractId } });
     if (['cancelled', 'expired'].includes(c.status)) throw conflict('INVALID_STATE', `Contract is ${c.status}`);
     if (c.paidAmount + p.amount > c.totalAmount) throw conflict('AMOUNT_EXCEEDS_DEBT', 'Confirming would overpay the contract');
     const r = await tx.payment.updateMany({
@@ -23,8 +25,8 @@ export async function confirmPayment(paymentId: string, byUser: string | null, s
     });
     const fresh = await tx.payment.findUniqueOrThrow({ where: { id: p.id } });
     if (!r.count) return { payment: fresh, replay: true };
-    const paid = await recalcPaid(tx, p.contractId);
-    await addEvent(tx, p.contractId, 'payment_confirmed', byUser, source, { payment_id: p.id, amount: p.amount, method: p.method, paid_amount: paid });
+    const paid = await recalcPaid(tx, contractId);
+    await addEvent(tx, contractId, 'payment_confirmed', byUser, source, { payment_id: p.id, amount: p.amount, method: p.method, paid_amount: paid });
     return { payment: fresh, replay: false };
   });
   if (!result.replay) {

@@ -70,7 +70,7 @@ async function monthRevenue(month: string, marketingIds: Set<string>): Promise<M
   const out: MonthRevenue = { memberBySale: new Map(), memberTotal: 0, ptByAttr: new Map() };
   for (const p of pays) {
     const v = contribution(p, from, to);
-    if (!v) continue;
+    if (!v || !p.contract) continue;
     const cat = p.contract.package.category;
     if (cat === 'member') {
       out.memberTotal += v;
@@ -139,7 +139,7 @@ export async function computePreview(month: string, branchId?: string): Promise<
       where: { contractId: { in: [...contracts.keys()] }, ...inRangeWhere(epoch, to) },
       select: { contractId: true, amount: true, status: true, confirmedAt: true, refundedAt: true },
     });
-    for (const p of pays) add(paidToDate, p.contractId, contribution(p, epoch, to));
+    for (const p of pays) if (p.contractId) add(paidToDate, p.contractId, contribution(p, epoch, to));
   }
   const sessionPay = new Map<string, number>();
   const sessionCount = new Map<string, number>();

@@ -73,6 +73,7 @@ model Branch {
   groupClasses GroupClass[]
   ptDayOffs    PtDayOff[]
   staffDevices StaffDevice[]
+  dayTickets   DayTicket[]
 
   @@map("branches")
 }
@@ -233,6 +234,7 @@ model Member {
   photo      MemberPhoto?
   ptSessions PtSession[]
   groupRegs  GroupRegistration[]
+  inbody     InbodyRecord[]
 
   @@index([branchId])
   @@index([status])
@@ -362,7 +364,8 @@ model Shift {
 
 model Payment {
   id                String        @id @default(uuid()) @db.Uuid
-  contractId        String        @map("contract_id") @db.Uuid
+  contractId        String?       @map("contract_id") @db.Uuid
+  kind              String        @default("contract")
   branchId          String        @map("branch_id") @db.Uuid
   method            PaymentMethod
   amount            Int
@@ -381,14 +384,53 @@ model Payment {
   refundedAt        DateTime?     @map("refunded_at") @db.Timestamptz
   refundedBy        String?       @map("refunded_by") @db.Uuid
 
-  contract Contract @relation(fields: [contractId], references: [id])
-  branch   Branch   @relation(fields: [branchId], references: [id])
-  shift    Shift?   @relation("PaymentShift", fields: [shiftId], references: [id])
+  contract  Contract?  @relation(fields: [contractId], references: [id])
+  branch    Branch     @relation(fields: [branchId], references: [id])
+  shift     Shift?     @relation("PaymentShift", fields: [shiftId], references: [id])
+  dayTicket DayTicket?
 
   @@index([contractId])
   @@index([branchId, confirmedAt])
   @@index([shiftId])
   @@map("payments")
+}
+
+model DayTicket {
+  id           String    @id @default(uuid()) @db.Uuid
+  paymentId    String    @unique @map("payment_id") @db.Uuid
+  branchId     String    @map("branch_id") @db.Uuid
+  name         String
+  phone        String
+  issuedOn     DateTime  @map("issued_on") @db.Date
+  checkedOutAt DateTime? @map("checked_out_at") @db.Timestamptz
+  createdBy    String?   @map("created_by") @db.Uuid
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  payment Payment @relation(fields: [paymentId], references: [id])
+  branch  Branch  @relation(fields: [branchId], references: [id])
+
+  @@index([branchId, issuedOn])
+  @@index([phone, issuedOn])
+  @@map("day_tickets")
+}
+
+model InbodyRecord {
+  id         String   @id @default(uuid()) @db.Uuid
+  memberId   String   @map("member_id") @db.Uuid
+  measuredOn DateTime @map("measured_on") @db.Date
+  weight     Decimal  @db.Decimal(5, 1)
+  height     Decimal  @db.Decimal(5, 1)
+  bodyFat    Decimal  @map("body_fat") @db.Decimal(4, 1)
+  muscle     Decimal  @db.Decimal(5, 1)
+  source     String   @default("manual")
+  note       String?
+  createdBy  String?  @map("created_by") @db.Uuid
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  member Member @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@index([memberId, measuredOn])
+  @@map("inbody_records")
 }
 
 model PaymentWebhookDelivery {

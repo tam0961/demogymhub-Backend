@@ -61,6 +61,7 @@ type PaymentWithContract = Payment & { contract?: { id: string; code: string; me
 export const paymentToApi = (p: PaymentWithContract) => ({
   id: p.id,
   contract_id: p.contractId,
+  kind: p.kind,
   method: p.method,
   amount: p.amount,
   status: p.status,
@@ -93,7 +94,7 @@ export async function lastPaymentMethods(contractIds: string[]) {
     orderBy: [{ confirmedAt: 'desc' }, { createdAt: 'desc' }],
     select: { contractId: true, method: true },
   });
-  for (const r of rows) if (!out.has(r.contractId)) out.set(r.contractId, r.method);
+  for (const r of rows) if (r.contractId && !out.has(r.contractId)) out.set(r.contractId, r.method);
   return out;
 }
 
@@ -105,7 +106,7 @@ export async function lastPaymentDates(contractIds: string[]) {
     orderBy: [{ confirmedAt: 'desc' }, { createdAt: 'desc' }],
     select: { contractId: true, confirmedAt: true, createdAt: true },
   });
-  for (const r of rows) if (!out.has(r.contractId)) out.set(r.contractId, r.confirmedAt ?? r.createdAt);
+  for (const r of rows) if (r.contractId && !out.has(r.contractId)) out.set(r.contractId, r.confirmedAt ?? r.createdAt);
   return out;
 }
 

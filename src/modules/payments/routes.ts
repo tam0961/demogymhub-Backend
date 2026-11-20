@@ -106,7 +106,8 @@ const reason = z.string().trim().min(1).max(500);
 async function scopedPayment(req: Request, id: string) {
   const p = await prisma.payment.findUnique({ where: { id } });
   if (!p || !branchAllowed(req.access!, p.branchId)) throw notFound('Payment not found');
-  return p;
+  if (p.contractId === null) throw conflict('RETAIL_PAYMENT', 'Giao dịch vé lẻ không có hợp đồng');
+  return p as Payment & { contractId: string };
 }
 
 const sameRequest = (p: Payment, b: z.infer<typeof createSchema>) => p.contractId === b.contract_id && p.method === b.method && p.amount === b.amount;

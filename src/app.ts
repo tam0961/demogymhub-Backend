@@ -29,6 +29,8 @@ import { printRouter } from './modules/printing/routes';
 import { attendancePublicRouter, attendanceRouter } from './modules/attendance/routes';
 import { payrollRouter } from './modules/payroll/routes';
 import { staffRouter } from './modules/staff/routes';
+import { dayTicketsRouter } from './modules/daytickets/routes';
+import { inbodyRouter } from './modules/inbody/routes';
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -81,7 +83,9 @@ export function createApp() {
     });
   });
 
+  app.use('/api/members', inbodyRouter);
   app.use('/api/members', membersRouter);
+  app.use('/api/day-tickets', dayTicketsRouter);
   app.use('/api/packages', packagesRouter);
   app.use('/api/contracts', contractsRouter);
   app.use('/api/contracts', contractTicketsRouter);

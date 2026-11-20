@@ -149,7 +149,7 @@ export async function computeKpis(month: string, staff: StaffRef[], branchIds: s
   });
   for (const p of pays) {
     const v = contribution(p, from, to);
-    if (!v) continue;
+    if (!v || !p.contract) continue;
     for (const id of credit(p.contract.saleUserId, p.contract.ptUserId)) {
       k(id).revenue += v;
       if (isPtCat(p.contract.package.category)) k(id).pt_revenue += v;

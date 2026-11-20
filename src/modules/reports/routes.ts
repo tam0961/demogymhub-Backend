@@ -33,10 +33,10 @@ reportsRouter.get('/dashboard', authorize('reports.view'), async (req, res) => {
     where: { ...bf, status: 'confirmed', confirmedAt: range },
     select: { amount: true, contract: { select: { package: { select: { category: true, displayGroup: true } } } } },
   });
-  const byKind: Record<string, number> = { member: 0, pt_1on1: 0, pt_1on2: 0, pt_group: 0 };
+  const byKind: Record<string, number> = { member: 0, pt_1on1: 0, pt_1on2: 0, pt_group: 0, retail: 0 };
   for (const x of paidKinds) {
-    const pk = x.contract.package;
-    const kind = pk.displayGroup === 'pt_group' ? 'pt_group' : pk.category;
+    const pk = x.contract?.package;
+    const kind = !pk ? 'retail' : pk.displayGroup === 'pt_group' ? 'pt_group' : pk.category;
     byKind[kind] = (byKind[kind] ?? 0) + x.amount;
   }
 
@@ -152,7 +152,7 @@ reportsRouter.get('/today-tasks', authorize('contracts.read'), async (req, res) 
         count: expCount,
         items: expiring.map((c) => ({ id: c.id, code: c.code, member_name: c.member.name, end_date: c.endDate!.toISOString().slice(0, 10) })),
       },
-      pending_refunds: { count: refundCount, items: refunds.map((r) => ({ id: r.id, contract_code: r.contract.code, amount: r.amount })) },
+      pending_refunds: { count: refundCount, items: refunds.map((r) => ({ id: r.id, contract_code: r.contract?.code ?? '', amount: r.amount })) },
     },
   });
 });
@@ -241,11 +241,11 @@ reportsRouter.get('/revenue-services', authorize('reports.view'), async (req, re
     prisma.payment.findMany({ where: { ...bf, status: 'refunded', refundedAt: { gte: from, lt: to } }, select: { amount: true, contract: include.contract } }),
   ]);
   const rows = new Map<string, { name: string; group: 'gym' | 'pt'; revenue: number; contracts: Set<string> }>();
-  const add = (x: { amount: number; contract: { id: string; packageName: string | null; package: { id: string; name: string; category: string } } }, sign: 1 | -1) => {
-    const key = x.contract.package.id;
-    const r = rows.get(key) ?? { name: x.contract.packageName ?? x.contract.package.name, group: x.contract.package.category === 'member' ? 'gym' : 'pt', revenue: 0, contracts: new Set<string>() };
+  const add = (x: { amount: number; contract: { id: string; packageName: string | null; package: { id: string; name: string; category: string } } | null }, sign: 1 | -1) => {
+    const key = x.contract ? x.contract.package.id : 'retail';
+    const r = rows.get(key) ?? (x.contract ? { name: x.contract.packageName ?? x.contract.package.name, group: x.contract.package.category === 'member' ? 'gym' : 'pt', revenue: 0, contracts: new Set<string>() } : { name: 'Vé lẻ', group: 'gym' as const, revenue: 0, contracts: new Set<string>() });
     r.revenue += sign * x.amount;
-    if (sign === 1) r.contracts.add(x.contract.id);
+    if (sign === 1) r.contracts.add(x.contract?.id ?? `retail:${x.amount}:${r.contracts.size}`);
     rows.set(key, r);
   };
   for (const x of paid) add(x, 1);
@@ -340,8 +340,8 @@ reportsRouter.get('/business', authorize('reports.view'), async (req, res) => {
   const revenue = empty();
   for (const c of created) revenue[bucketOf(c.createdAt)][kindOf(c.package)] += c.totalAmount;
   const collected = empty();
-  for (const x of paid) collected[bucketOf(x.confirmedAt!)][kindOf(x.contract.package)] += x.amount;
-  for (const x of refunded) collected[bucketOf(x.refundedAt!)][kindOf(x.contract.package)] -= x.amount;
+  for (const x of paid) collected[bucketOf(x.confirmedAt!)][x.contract ? kindOf(x.contract.package) : 'member'] += x.amount;
+  for (const x of refunded) collected[bucketOf(x.refundedAt!)][x.contract ? kindOf(x.contract.package) : 'member'] -= x.amount;
   const sum = (rows: typeof revenue) => rows.reduce((s, r) => s + r.member + r.pt + r.group, 0);
 
   const d7 = addDays(today, 7);
@@ -446,7 +446,7 @@ reportsRouter.get('/business', authorize('reports.view'), async (req, res) => {
 
   const activity = [
     ...activityCheckins.map((c) => ({ type: 'checkin' as const, at: c.checkedInAt, text: `${c.member.name} check-in tại ${branchName.get(c.branchId)?.name ?? ''}` })),
-    ...activityPays.map((x) => ({ type: 'payment' as const, at: x.confirmedAt!, text: `${x.contract.member.name} thanh toán ${x.amount.toLocaleString('vi-VN')} ₫` })),
+    ...activityPays.map((x) => ({ type: 'payment' as const, at: x.confirmedAt!, text: `${x.contract?.member.name ?? 'Khách vé lẻ'} thanh toán ${x.amount.toLocaleString('vi-VN')} ₫` })),
     ...activityLeads.map((l) => ({ type: 'lead' as const, at: l.createdAt, text: `Khách tiềm năng mới: ${l.name}` })),
   ]
     .sort((a, b) => b.at.getTime() - a.at.getTime())
