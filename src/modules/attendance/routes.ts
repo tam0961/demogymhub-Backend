@@ -244,6 +244,43 @@ attendancePublicRouter.post('/facepush/:key', async (req, res) => {
   res.json({ data: { result: 'saved' } });
 });
 
+async function scanMemberView(memberId: string, branchId: string, todayStr: string) {
+  const m = await prisma.member.findUnique({ where: { id: memberId }, select: { id: true, code: true, name: true, phone: true, status: true, branchId: true } });
+  if (!m) return null;
+  const photo = await prisma.memberPhoto.findUnique({ where: { memberId: m.id }, select: { updatedAt: true } });
+  const contracts = await prisma.contract.findMany({
+    where: { memberId: m.id, status: { notIn: ['draft', 'cancelled'] } },
+    select: { id: true, code: true, status: true, totalAmount: true, paidAmount: true, endDate: true, startDate: true, sessionsTotal: true, sessionsLeft: true, package: { select: { name: true, category: true, checkinBefore: true } }, packageName: true },
+    orderBy: [{ endDate: { sort: 'desc', nulls: 'first' } }],
+  });
+  const mc = contracts.find((c) => c.package.category === 'member');
+  const debt = contracts.reduce((a, c) => a + Math.max(c.totalAmount - c.paidAmount, 0), 0);
+  const debtC = contracts.filter((c) => c.totalAmount > c.paidAmount).sort((a, b) => b.totalAmount - b.paidAmount - (a.totalAmount - a.paidAmount))[0];
+  const ptC = contracts.find((c) => c.package.category !== 'member' && c.sessionsTotal != null && c.status !== 'expired');
+  const branch = await prisma.branch.findUnique({ where: { id: branchId }, select: { code: true, name: true } });
+  const endStr = mc?.endDate ? mc.endDate.toISOString().slice(0, 10) : null;
+  const state = !mc ? 'no_package' : mc.status === 'frozen' ? 'frozen' : mc.status === 'expired' || (endStr && endStr < todayStr) ? 'expired' : mc.startDate && mc.startDate.toISOString().slice(0, 10) > todayStr ? 'not_started' : 'ok';
+  return {
+      id: m.id,
+      code: m.code,
+      name: m.name,
+      phone: m.phone,
+      branch_id: m.branchId,
+      has_photo: !!photo,
+      photo_version: photo ? photo.updatedAt.getTime() : null,
+      package_name: mc ? (mc.packageName ?? mc.package.name) : null,
+      end_date: endStr,
+      state,
+      sessions_left: mc?.sessionsTotal != null ? mc.sessionsLeft : null,
+      debt,
+      branch,
+      contract_id: mc?.id ?? null,
+      checkin_before: mc?.package.checkinBefore ?? null,
+      debt_contract: debtC ? { id: debtC.id, code: debtC.code, amount: debtC.totalAmount - debtC.paidAmount } : null,
+      pt: ptC ? { package_name: ptC.packageName ?? ptC.package.name, sessions_left: ptC.sessionsLeft, sessions_total: ptC.sessionsTotal } : null,
+  };
+}
+
 export const attendanceRouter = Router();
 attendanceRouter.use(authenticate);
 
@@ -279,51 +316,21 @@ attendanceRouter.get('/scans', authorize('checkins.read'), async (req, res) => {
       items.push({ ...base, member: null });
       continue;
     }
-    const m = await prisma.member.findUnique({ where: { id: e.memberId }, select: { id: true, code: true, name: true, phone: true, status: true, branchId: true } });
-    if (!m) {
-      items.push({ ...base, member: null });
-      continue;
-    }
-    const photo = await prisma.memberPhoto.findUnique({ where: { memberId: m.id }, select: { updatedAt: true } });
-    const contracts = await prisma.contract.findMany({
-      where: { memberId: m.id, status: { notIn: ['draft', 'cancelled'] } },
-      select: { id: true, code: true, status: true, totalAmount: true, paidAmount: true, endDate: true, startDate: true, sessionsTotal: true, sessionsLeft: true, package: { select: { name: true, category: true, checkinBefore: true } }, packageName: true },
-      orderBy: [{ endDate: { sort: 'desc', nulls: 'first' } }],
-    });
-    const mc = contracts.find((c) => c.package.category === 'member');
-    const debt = contracts.reduce((a, c) => a + Math.max(c.totalAmount - c.paidAmount, 0), 0);
-    const debtC = contracts.filter((c) => c.totalAmount > c.paidAmount).sort((a, b) => b.totalAmount - b.paidAmount - (a.totalAmount - a.paidAmount))[0];
-    const ptC = contracts.find((c) => c.package.category !== 'member' && c.sessionsTotal != null && c.status !== 'expired');
-    const branch = await prisma.branch.findUnique({ where: { id: e.branchId }, select: { code: true, name: true } });
-    const endStr = mc?.endDate ? mc.endDate.toISOString().slice(0, 10) : null;
-    const state = !mc ? 'no_package' : mc.status === 'frozen' ? 'frozen' : mc.status === 'expired' || (endStr && endStr < todayStr) ? 'expired' : mc.startDate && mc.startDate.toISOString().slice(0, 10) > todayStr ? 'not_started' : 'ok';
-    items.push({
-      ...base,
-      member: {
-        id: m.id,
-        code: m.code,
-        name: m.name,
-        phone: m.phone,
-        branch_id: m.branchId,
-        has_photo: !!photo,
-        photo_version: photo ? photo.updatedAt.getTime() : null,
-        package_name: mc ? (mc.packageName ?? mc.package.name) : null,
-        end_date: endStr,
-        state,
-        sessions_left: mc?.sessionsTotal != null ? mc.sessionsLeft : null,
-        debt,
-        branch,
-        contract_id: mc?.id ?? null,
-        checkin_before: mc?.package.checkinBefore ?? null,
-        debt_contract: debtC ? { id: debtC.id, code: debtC.code, amount: debtC.totalAmount - debtC.paidAmount } : null,
-        pt: ptC ? { package_name: ptC.packageName ?? ptC.package.name, sessions_left: ptC.sessionsLeft, sessions_total: ptC.sessionsTotal } : null,
-      },
-    });
+    const member = await scanMemberView(e.memberId, e.branchId, todayStr);
+    items.push({ ...base, member });
   }
   const devices = await prisma.staffDevice.findMany({ where: bf, select: { lastSeenAt: true, paused: true } });
   const paused = devices.length ? devices.every((d) => d.paused) : null;
   const bridgeOk = devices.length ? devices.some((d) => d.lastSeenAt && Date.now() - d.lastSeenAt.getTime() < 90_000) : null;
   res.json({ data: { now: now.toISOString(), items, bridge_ok: bridgeOk, paused } });
+});
+
+attendanceRouter.get('/scan-preview', authorize('checkins.read'), async (req, res) => {
+  const q = z.object({ member_id: uuid }).parse(req.query);
+  const m = await prisma.member.findUnique({ where: { id: q.member_id }, select: { branchId: true } });
+  if (!m || !branchAllowed(req.access!, m.branchId)) throw notFound('Member not found');
+  const member = await scanMemberView(q.member_id, m.branchId, vnDayOf(new Date()));
+  res.json({ data: { member } });
 });
 
 attendanceRouter.post('/face-jobs', authorize('members.update'), async (req, res) => {

@@ -199,3 +199,14 @@ describe('pausing the device connection', () => {
   });
 });
 
+
+describe('scan preview for manual check-in', () => {
+  it('returns the same member view the popup uses', async () => {
+    const r = await request(app).get('/api/attendance/scan-preview').query({ member_id: memberId }).set(h());
+    expect(r.status).toBe(200);
+    expect(r.body.data.member.id).toBe(memberId);
+    expect(r.body.data.member.branch.name).toBeTruthy();
+    const none = await request(app).get('/api/attendance/scan-preview').query({ member_id: '00000000-0000-4000-8000-000000000000' }).set(h());
+    expect(none.status).toBe(404);
+  });
+});
