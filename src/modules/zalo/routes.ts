@@ -2,10 +2,11 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { audit } from '../../lib/audit';
 import { badRequest } from '../../lib/errors';
+import { config } from '../../config';
 import { prisma } from '../../lib/prisma';
 import { authenticate, authorize } from '../../middlewares/auth';
 import { CLEAN_TPL_KEYS, PT_TPL_KEYS, SHOOT_TPL_KEYS, getBotCfg, getBotState, publicBotCfg, saveBotCfg, parseWindows, type CleanTplKey, type PtTplKey, type ShootTplKey } from '../zalobot/config';
-import { sendText, zaloApi } from '../zalobot/service';
+import { fetchBotLabel, sendText, zaloApi } from '../zalobot/service';
 import { branchAllowed } from '../rbac/service';
 import { getZns, publicZns, saveZns, sendZns, sendExpiryReminders, SAMPLE_VARS, ZNS_EVENTS } from './service';
 
@@ -99,7 +100,10 @@ zaloRouter.put('/bot/config', async (req, res) => {
   if (b.branch_id && !branchAllowed(req.access!, b.branch_id)) throw badRequest('BRANCH_INVALID', 'Branch not permitted');
   if (b.group_windows && parseWindows(b.group_windows).length === 0) throw badRequest('WINDOWS_INVALID', 'Use the form 06:30-07:45, 20:00-21:15');
   const cfg = await getBotCfg();
-  if (b.token) cfg.token = b.token;
+  if (b.token) {
+    cfg.token = b.token;
+    cfg.botLabel = config.APP_ENV === 'test' ? '' : await fetchBotLabel(b.token);
+  }
   Object.assign(cfg, { enabled: b.enabled, botName: b.bot_name, ptGroup: b.pt_group, branchId: b.branch_id || cfg.branchId, groupTrainer: b.group_trainer, groupWindows: b.group_windows });
   if (!cfg.branchId) {
     const rows = await prisma.userRole.findMany({ where: { role: { key: 'trainer' }, branchId: { not: null }, user: { status: 'active' } }, select: { branchId: true }, distinct: ['branchId'] });
@@ -141,6 +145,13 @@ zaloRouter.post('/bot/check', async (_req, res) => {
   const cfg = await getBotCfg();
   if (!cfg.token) throw badRequest('TOKEN_REQUIRED', 'Enter the bot token first');
   const r = await zaloApi(cfg.token, 'getMe');
+  if (r?.ok) {
+    const label = await fetchBotLabel(cfg.token);
+    if (label && label !== cfg.botLabel) {
+      cfg.botLabel = label;
+      await saveBotCfg(cfg);
+    }
+  }
   res.json({ data: { ok: !!r?.ok, message: r ? (r.ok ? 'ok' : String(r.description ?? r.error_code ?? 'error')) : 'Không kết nối được Zalo' } });
 });
 

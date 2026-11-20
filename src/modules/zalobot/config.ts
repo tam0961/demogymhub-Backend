@@ -15,6 +15,7 @@ export interface BotCfg {
   shootOn: boolean;
   shootGroup: string;
   shootBoss: string;
+  botLabel: string;
   ptTpl: Partial<Record<PtTplKey, string>>;
   shootTpl: Partial<Record<ShootTplKey, string>>;
 }
@@ -81,6 +82,7 @@ const freshCfg = (): BotCfg => ({
   shootOn: false,
   shootGroup: '',
   shootBoss: 'emma',
+  botLabel: '',
   ptTpl: {},
   shootTpl: {},
 });
@@ -124,6 +126,7 @@ export function publicBotCfg(c: BotCfg) {
     shoot_on: c.shootOn,
     shoot_group: c.shootGroup,
     shoot_boss: c.shootBoss,
+    bot_label: c.botLabel,
     pt_tpl: ptTemplates(c),
     pt_tpl_default: PT_TPL_DEFAULT,
     shoot_tpl: shootTemplates(c),

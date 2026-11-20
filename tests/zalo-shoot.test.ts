@@ -20,7 +20,7 @@ const deps = {
     return true;
   },
 };
-const cfg: BotCfg = { enabled: true, token: 'T', botName: 'Bot AI TH Gym', ptGroup: '', branchId: '', groupTrainer: '', groupWindows: '', cleanOn: false, cleanGroup: '', cleanTpl: {}, shootOn: true, shootGroup: 'sg', shootBoss: 'emma', ptTpl: {}, shootTpl: {} };
+const cfg: BotCfg = { enabled: true, token: 'T', botName: 'Bot AI TH Gym', ptGroup: '', branchId: '', groupTrainer: '', groupWindows: '', cleanOn: false, cleanGroup: '', cleanTpl: {}, shootOn: true, shootGroup: 'sg', shootBoss: 'emma', botLabel: '', ptTpl: {}, shootTpl: {} };
 const at = (date: string, h: number, mi = 0, dow = 1) => ({ date, h, mi, dow });
 
 beforeAll(async () => {

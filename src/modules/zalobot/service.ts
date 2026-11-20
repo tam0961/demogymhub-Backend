@@ -32,6 +32,15 @@ export async function zaloApi(token: string, method: string, body: object = {}, 
   }
 }
 
+/** Name of the bot behind a token, from getMe; empty when Zalo does not answer or has no name field. */
+export async function fetchBotLabel(token: string): Promise<string> {
+  const r = await zaloApi(token, 'getMe', {}, 8000);
+  if (!r?.ok || !r.result || typeof r.result !== 'object') return '';
+  const x = r.result as Record<string, unknown>;
+  const v = x.display_name ?? x.account_name ?? x.name ?? x.username ?? '';
+  return typeof v === 'string' ? v.slice(0, 80) : '';
+}
+
 export async function sendText(cfg: Pick<BotCfg, 'token'>, chatId: string, text: string) {
   return zaloApi(cfg.token, 'sendMessage', { chat_id: chatId, text: text.slice(0, 2000) });
 }

@@ -115,6 +115,14 @@ describe('zalo bot in the PT group', () => {
     await request(app).put('/api/zalo/bot/config').set({ Authorization: `Bearer ${ownerToken}` }).send({ enabled: true, bot_name: 'Bot AI TH Gym', pt_group: group, branch_id: A, group_trainer: 'Thinh', group_windows: '06:30-07:45, 20:00-21:15', pt_tpl: {} }).expect(200);
   });
 
+  it('reads the bot name from getMe when checking the connection', async () => {
+    vi.stubGlobal('fetch', async () => ({ status: 200, json: async () => ({ ok: true, result: { display_name: 'Bot Demo' } }) }));
+    const chk = await request(app).post('/api/zalo/bot/check').set({ Authorization: `Bearer ${ownerToken}` });
+    expect(chk.body.data.ok).toBe(true);
+    const get = await request(app).get('/api/zalo/bot/config').set({ Authorization: `Bearer ${ownerToken}` });
+    expect(get.body.data.bot_label).toBe('Bot Demo');
+  });
+
   it('applies a weekly OFF message to the days of that week', async () => {
     stubZalo();
     const cfg = await getBotCfg();
