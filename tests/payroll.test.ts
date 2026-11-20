@@ -90,6 +90,21 @@ describe('payroll calculation (pure)', () => {
     expect([flatRate(0, t), flatRate(29_999_999, t), flatRate(30_000_000, t), flatRate(49_999_999, t), flatRate(50_000_000, t), flatRate(64_999_999, t), flatRate(65_000_000, t), flatRate(90_000_000, t)]).toEqual([0, 25, 27, 27, 30, 30, 35, 35]);
   });
 
+  it('golden cases shared with the admin simulator (apps/admin/src/test/payroll.test.ts)', () => {
+    const run = (position: 'pt_fulltime' | 'pt_parttime' | 'marketing', c: { base: number; member: number; gym: number; pt: number; total: number; taught: number; classes: number; penalty: number }) => {
+      const fund = (flatRate(c.pt, DEFAULT_SETTINGS.ptTiers) / 100) * c.pt;
+      const sessionPay = position === 'marketing' || c.total <= 0 ? 0 : Math.round(((DEFAULT_SETTINGS.ptSessionShare * fund) / c.total) * c.taught);
+      const taxMode = position === 'pt_parttime' ? 'flat10' : 'progressive';
+      return computeRow({ userId: 'u', name: 'U', profile: { position, baseSalary: c.base, hasInsurance: position !== 'pt_parttime', taxMode, dependents: 0 }, memberSales: c.member, gymMemberTotal: c.gym, ptSales: c.pt, ptSessionPay: sessionPay, ptSessionsTaught: c.taught, groupClasses: c.classes, penalty: c.penalty, adjustment: 0 }, DEFAULT_SETTINGS);
+    };
+    const a = run('pt_fulltime', { base: 5_500_000, member: 20_000_000, gym: 0, pt: 35_000_000, total: 10, taught: 4, classes: 3, penalty: 100_000 });
+    expect([a.gross, a.insurance, a.tax, a.net]).toEqual([12_198_000, 577_500, 0, 11_520_500]);
+    const b = run('pt_parttime', { base: 3_000_000, member: 4_000_000, gym: 0, pt: 20_000_000, total: 8, taught: 6, classes: 5, penalty: 0 });
+    expect([b.gross, b.insurance, b.tax, b.net]).toEqual([7_810_000, 0, 781_000, 7_029_000]);
+    const c = run('marketing', { base: 8_000_000, member: 31_000_000, gym: 200_000_000, pt: 5_000_000, total: 0, taught: 0, classes: 0, penalty: 50_000 });
+    expect([c.gross, c.insurance, c.tax, c.net]).toEqual([13_460_000, 577_500, 0, 12_832_500]);
+  });
+
   it('progressive mode without brackets deducts the fixed tax amount', () => {
     const s = { ...DEFAULT_SETTINGS, fixedTax: 300_000 };
     const r = computeRow({ userId: 'u', name: 'U', profile: { position: 'pt_fulltime', baseSalary: 5_500_000, hasInsurance: true, taxMode: 'progressive', dependents: 0 }, memberSales: 0, gymMemberTotal: 0, ptSales: 0, ptSessionPay: 0, ptSessionsTaught: 0, groupClasses: 0, penalty: 0, adjustment: 0 }, s);
