@@ -40,6 +40,7 @@ const settingsSchema = z
   .refine((s) => Math.abs(s.ptImmediateShare + s.ptSessionShare - 1) < 1e-9, 'ptImmediateShare + ptSessionShare must equal 1');
 
 const profileSchema = z.object({
+  name: z.string().trim().min(1).max(100).optional(),
   position: z.enum(POSITIONS),
   base_salary: z.number().int().min(0),
   has_insurance: z.boolean(),
@@ -61,7 +62,7 @@ payrollRouter.put('/settings', authorize('payroll.manage'), async (req, res) => 
 
 payrollRouter.get('/profiles', authorize('payroll.read'), async (_req, res) => {
   const users = await prisma.user.findMany({
-    where: { status: 'active', OR: [{ staffProfile: null }, { staffProfile: { active: true } }], userRoles: { some: { role: { key: { not: 'member' } } } } },
+    where: { status: 'active', staffProfile: { active: true } },
     select: {
       id: true,
       name: true,
@@ -98,6 +99,11 @@ payrollRouter.put('/profiles/:userId', authorize('payroll.manage'), async (req, 
   if (!(await prisma.user.findUnique({ where: { id: userId }, select: { id: true } }))) throw notFound('User not found');
   const data = { position: b.position, baseSalary: b.base_salary, hasInsurance: b.has_insurance, taxMode: b.tax_mode, dependents: b.dependents, active: b.active };
   const p = await prisma.payrollProfile.upsert({ where: { userId }, update: data, create: { userId, ...data } });
+  if (b.name !== undefined) await prisma.user.update({ where: { id: userId }, data: { name: b.name } });
+  const sp = await prisma.staffProfile.findUnique({ where: { userId }, select: { position: true } });
+  if (sp && !(b.position === 'other' && sp.position === 'reception') && sp.position !== b.position) {
+    await prisma.staffProfile.update({ where: { userId }, data: { position: b.position } });
+  }
   await audit(req.auth!.userId, 'payroll.profile_updated', { user_id: userId, position: b.position }, req.ip, userId);
   res.json({ data: { position: p.position, base_salary: p.baseSalary, has_insurance: p.hasInsurance, tax_mode: p.taxMode, dependents: p.dependents, active: p.active } });
 });

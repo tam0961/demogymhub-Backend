@@ -182,14 +182,21 @@ describe('payroll API', () => {
     expect((await request(app).put('/api/payroll/settings').set(auth(owner)).send({ ...g.body.data, memberTiers: [{ upTo: 100, rate: 1 }] })).status).toBe(400);
   });
 
-  it('lists staff with their payroll profile', async () => {
+  it('lists the staff list only (no owner), with their payroll profile, and edits name and position in sync', async () => {
+    await prisma.staffProfile.upsert({ where: { userId: ids.ptFull }, update: { active: true }, create: { userId: ids.ptFull, position: 'pt_fulltime', active: true } });
     const r = await request(app).get('/api/payroll/profiles').set(auth(owner));
     expect(r.status).toBe(200);
     const mine = r.body.data.find((x: { user_id: string }) => x.user_id === ids.ptFull);
     expect(mine.profile.position).toBe('pt_fulltime');
     expect(mine.roles).toContain('trainer');
     expect(mine.branch_codes).toContain(`py${sfx}`);
-    expect(r.body.data.some((x: { roles: string[] }) => x.roles.length === 1 && x.roles[0] === 'member')).toBe(false);
+    expect(r.body.data.every((x: { roles: string[] }) => !x.roles.includes('owner'))).toBe(true);
+    const put = await request(app).put(`/api/payroll/profiles/${ids.ptFull}`).set(auth(owner)).send({ ...mine.profile, name: 'PT Full Doi Ten', position: 'pt_parttime' });
+    expect(put.status).toBe(200);
+    const u = await prisma.user.findUniqueOrThrow({ where: { id: ids.ptFull }, include: { staffProfile: true } });
+    expect(u.name).toBe('PT Full Doi Ten');
+    expect(u.staffProfile?.position).toBe('pt_parttime');
+    await request(app).put(`/api/payroll/profiles/${ids.ptFull}`).set(auth(owner)).send({ ...mine.profile, name: 'PT Full Doi Ten', position: 'pt_fulltime' });
   });
 
   it('computes the full-time PT: 40% now, 60% per taught session, group classes, insurance on fixed base, fixed tax 0', async () => {
