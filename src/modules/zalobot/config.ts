@@ -60,6 +60,8 @@ export interface BotState {
   chats: SeenChat[];
 }
 
+export const DEFAULT_GROUP_TRAINER = 'Thịnh';
+export const DEFAULT_GROUP_WINDOWS = '06:30-07:45, 20:00-21:15';
 const CFG_KEY = 'zalobot';
 const STATE_KEY = 'zalobot_state';
 
@@ -81,7 +83,10 @@ const freshCfg = (): BotCfg => ({
 
 export async function getBotCfg(): Promise<BotCfg> {
   const row = await prisma.setting.findUnique({ where: { key: CFG_KEY } });
-  return { ...freshCfg(), ...((row?.value ?? {}) as Partial<BotCfg>) };
+  const cfg = { ...freshCfg(), ...((row?.value ?? {}) as Partial<BotCfg>) };
+  if (!cfg.groupTrainer.trim()) cfg.groupTrainer = DEFAULT_GROUP_TRAINER;
+  if (!cfg.groupWindows.trim()) cfg.groupWindows = DEFAULT_GROUP_WINDOWS;
+  return cfg;
 }
 
 export async function saveBotCfg(cfg: BotCfg) {
