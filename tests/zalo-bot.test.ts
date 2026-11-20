@@ -115,6 +115,20 @@ describe('zalo bot in the PT group', () => {
     await request(app).put('/api/zalo/bot/config').set({ Authorization: `Bearer ${ownerToken}` }).send({ enabled: true, bot_name: 'Bot AI TH Gym', pt_group: group, branch_id: A, group_trainer: 'Thinh', group_windows: '06:30-07:45, 20:00-21:15', pt_tpl: {} }).expect(200);
   });
 
+  it('stops the PT group reminders when the PT bot is switched off', async () => {
+    stubZalo();
+    const base = { enabled: true, bot_name: 'Bot AI TH Gym', pt_group: group, branch_id: A, group_trainer: 'Thinh', group_windows: '06:30-07:45, 20:00-21:15' };
+    const off = await request(app).put('/api/zalo/bot/config').set({ Authorization: `Bearer ${ownerToken}` }).send({ ...base, pt_on: false });
+    expect(off.body.data.pt_on).toBe(false);
+    sent.length = 0;
+    await runReminders(new Date('2030-03-03T20:00:00+07:00'));
+    expect(sent).toHaveLength(0);
+    const on = await request(app).put('/api/zalo/bot/config').set({ Authorization: `Bearer ${ownerToken}` }).send({ ...base, pt_on: true });
+    expect(on.body.data.pt_on).toBe(true);
+    await runReminders(new Date('2030-03-10T20:00:00+07:00'));
+    expect(sent[0].text).toContain('Nhắc lịch OFF');
+  });
+
   it('reads the bot name from getMe when checking the connection', async () => {
     vi.stubGlobal('fetch', async () => ({ status: 200, json: async () => ({ ok: true, result: { display_name: 'Bot Demo' } }) }));
     const chk = await request(app).post('/api/zalo/bot/check').set({ Authorization: `Bearer ${ownerToken}` });

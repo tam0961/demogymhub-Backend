@@ -90,6 +90,7 @@ const botSchema = z.object({
   shoot_on: z.boolean().optional(),
   shoot_group: z.string().trim().max(100).optional(),
   shoot_boss: z.string().trim().min(1).max(40).optional(),
+  pt_on: z.boolean().optional(),
   report_on: z.boolean().optional(),
   report_script_url: z.string().trim().max(400).optional(),
   report_share_link: z.boolean().optional(),
@@ -121,6 +122,7 @@ zaloRouter.put('/bot/config', async (req, res) => {
     if (b.clean_on && (!cfg.token || !cfg.cleanGroup)) throw badRequest('CLEAN_INCOMPLETE', 'Token and cleaning group are required to turn the cleaning bot on');
     cfg.cleanOn = b.clean_on;
   }
+  if (b.pt_on !== undefined) cfg.ptOn = b.pt_on;
   if (b.shoot_group !== undefined) cfg.shootGroup = b.shoot_group;
   if (b.shoot_boss !== undefined) cfg.shootBoss = b.shoot_boss;
   if (b.shoot_on !== undefined) {
@@ -146,6 +148,7 @@ zaloRouter.put('/bot/config', async (req, res) => {
   if (b.report_script_url !== undefined) {
     if (b.report_script_url && !/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(b.report_script_url)) throw badRequest('SCRIPT_URL_INVALID', 'Địa chỉ Web app phải có dạng https://script.google.com/macros/s/.../exec');
     rc.scriptUrl = b.report_script_url;
+    rc.on = !!rc.scriptUrl;
   }
   if (b.report_share_link !== undefined) rc.shareLink = b.report_share_link;
   if (b.report_on !== undefined) {

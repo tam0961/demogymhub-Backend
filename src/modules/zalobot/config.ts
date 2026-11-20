@@ -9,6 +9,7 @@ export interface BotCfg {
   branchId: string;
   groupTrainer: string;
   groupWindows: string;
+  ptOn: boolean;
   cleanOn: boolean;
   cleanGroup: string;
   cleanTpl: Partial<Record<CleanTplKey, string>>;
@@ -76,6 +77,7 @@ const freshCfg = (): BotCfg => ({
   branchId: '',
   groupTrainer: '',
   groupWindows: '',
+  ptOn: true,
   cleanOn: false,
   cleanGroup: '',
   cleanTpl: {},
@@ -119,6 +121,7 @@ export function publicBotCfg(c: BotCfg) {
     branch_id: c.branchId,
     group_trainer: c.groupTrainer,
     group_windows: c.groupWindows,
+    pt_on: c.ptOn,
     clean_on: c.cleanOn,
     clean_group: c.cleanGroup,
     clean_tpl: cleanTemplates(c),

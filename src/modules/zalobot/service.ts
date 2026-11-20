@@ -151,7 +151,7 @@ export async function handleUpdate(cfg: BotCfg, it: Update) {
     await handleCleanText(cfg, { say: (x) => sendText(cfg, cfg.cleanGroup, x), once }, m.text.replace(MENTION, ' '), by, vnParts(when));
     return;
   }
-  if (!m.text || m.from?.is_bot || !cfg.ptGroup || chatId !== cfg.ptGroup || !cfg.branchId) return;
+  if (!m.text || m.from?.is_bot || !cfg.ptOn || !cfg.ptGroup || chatId !== cfg.ptGroup || !cfg.branchId) return;
   const reply = await handleGroupText(cfg, m.text, m.date ? new Date(m.date * (m.date < 1e12 ? 1000 : 1)) : new Date());
   if (reply) await sendText(cfg, cfg.ptGroup, reply);
 }
@@ -193,7 +193,7 @@ async function missingFor(branchId: string, date: string) {
 /** Hourly reminders in the PT group; each slot is sent once (bot_sent) within the first 5 minutes of the hour. */
 export async function runReminders(now = new Date()) {
   const cfg = await getBotCfg();
-  if (!cfg.enabled || !cfg.token || !cfg.ptGroup || !cfg.branchId) return;
+  if (!cfg.enabled || !cfg.ptOn || !cfg.token || !cfg.ptGroup || !cfg.branchId) return;
   const t = vnParts(now);
   if (t.mi >= 5) return;
   const say = (text: string) => sendText(cfg, cfg.ptGroup, text);
