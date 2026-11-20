@@ -87,6 +87,21 @@ describe('pt sessions', () => {
   });
 });
 
+describe('quick pt sessions', () => {
+  it('discards an unsigned quick session without deducting, refuses normal ones', async () => {
+    await prisma.contract.update({ where: { id: contractId }, data: { sessionsLeft: 5 } });
+    const before = (await prisma.contract.findUniqueOrThrow({ where: { id: contractId } })).sessionsLeft;
+    const q = await request(app).post('/api/pt/sessions').set(h(reception)).send({ member_id: memberId, trainer_id: trainerId, contract_id: contractId, start_at: at(21), duration_min: 60, quick: true });
+    expect(q.status).toBe(201);
+    expect((await request(app).post(`/api/pt/sessions/${q.body.data.id}/discard`).set(h(reception))).status).toBe(200);
+    expect((await prisma.ptSession.findUniqueOrThrow({ where: { id: q.body.data.id } })).status).toBe('cancelled');
+    expect((await prisma.contract.findUniqueOrThrow({ where: { id: contractId } })).sessionsLeft).toBe(before);
+    expect((await request(app).post(`/api/pt/sessions/${q.body.data.id}/discard`).set(h(reception))).status).toBe(409);
+    const n = await request(app).post('/api/pt/sessions').set(h(reception)).send({ trainer_id: trainerId, start_at: at(22), duration_min: 60 });
+    expect((await request(app).post(`/api/pt/sessions/${n.body.data.id}/discard`).set(h(reception))).status).toBe(409);
+  });
+});
+
 describe('group classes', () => {
   const sessionsLeft = async () => (await prisma.contract.findUniqueOrThrow({ where: { id: classPkgContract } })).sessionsLeft;
 

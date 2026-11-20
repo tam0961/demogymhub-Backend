@@ -125,6 +125,7 @@ const createSchema = z.object({
   duration_min: z.number().int().min(15).max(240).default(60),
   note: z.string().trim().max(500).nullish(),
   branch_id: z.string().uuid().optional(),
+  quick: z.boolean().optional(),
 });
 
 ptRouter.post('/sessions', authorize('pt_sessions.create'), async (req, res) => {
@@ -156,6 +157,7 @@ ptRouter.post('/sessions', authorize('pt_sessions.create'), async (req, res) => 
         startAt,
         endAt,
         note: b.note ?? null,
+        source: b.quick ? 'quick' : 'manual',
         createdBy: req.auth!.userId,
       },
       include,
@@ -295,6 +297,15 @@ ptRouter.post('/sessions/:id/cancel', authorize('pt_sessions.cancel'), async (re
   });
   await audit(req.auth!.userId, late ? 'pt_session.late_cancelled' : 'pt_session.cancelled', { before: toApi(s), after: toApi(out) }, req.ip, s.id);
   res.json({ data: toApi(out) });
+});
+
+ptRouter.post('/sessions/:id/discard', authorize('pt_sessions.create'), async (req, res) => {
+  const s = await loadSession(req);
+  if (s.source !== 'quick') throw conflict('NOT_QUICK', 'Only quick sessions can be discarded');
+  const flip = await prisma.ptSession.updateMany({ where: { id: s.id, status: 'scheduled' }, data: { status: 'cancelled' } });
+  if (flip.count === 0) throw conflict('NOT_SCHEDULED', 'Session is not in scheduled state');
+  await audit(req.auth!.userId, 'pt_session.discarded', { before: toApi(s) }, req.ip, s.id);
+  res.json({ data: { ok: true } });
 });
 
 ptRouter.use('/classes', classesRouter);
