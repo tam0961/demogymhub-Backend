@@ -157,7 +157,7 @@ paymentsRouter.post('/', authorize('payments.create'), async (req, res) => {
         },
       });
       if (cash) {
-        const paid = await recalcPaid(tx, c.id);
+        const paid = await recalcPaid(tx, c.id, true);
         await addEvent(tx, c.id, 'payment_confirmed', userId, 'cash', { payment_id: p.id, amount: p.amount, method: 'cash', paid_amount: paid });
       } else {
         await addEvent(tx, c.id, 'payment_created', userId, null, { payment_id: p.id, amount: p.amount, method: p.method, ref: p.ref });

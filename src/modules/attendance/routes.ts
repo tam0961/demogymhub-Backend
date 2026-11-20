@@ -5,7 +5,8 @@ import { z } from 'zod';
 import type { Prisma } from '@prisma/client';
 import { audit } from '../../lib/audit';
 import { badRequest, conflict, notFound } from '../../lib/errors';
-import { vnDayOf } from '../../lib/dates';
+import { fmtDate, vnDayOf } from '../../lib/dates';
+import { overdueDays } from '../contracts/service';
 import { prisma } from '../../lib/prisma';
 import { authenticate, authorize } from '../../middlewares/auth';
 import { branchFilter, writeBranch } from '../rbac/scope';
@@ -250,7 +251,7 @@ async function scanMemberView(memberId: string, branchId: string, todayStr: stri
   const photo = await prisma.memberPhoto.findUnique({ where: { memberId: m.id }, select: { updatedAt: true } });
   const contracts = await prisma.contract.findMany({
     where: { memberId: m.id, status: { notIn: ['draft', 'cancelled'] } },
-    select: { id: true, code: true, status: true, totalAmount: true, paidAmount: true, endDate: true, startDate: true, sessionsTotal: true, sessionsLeft: true, package: { select: { name: true, category: true, checkinBefore: true } }, packageName: true },
+    select: { id: true, code: true, status: true, totalAmount: true, paidAmount: true, endDate: true, startDate: true, paymentDueDate: true, sessionsTotal: true, sessionsLeft: true, package: { select: { name: true, category: true, checkinBefore: true } }, packageName: true },
     orderBy: [{ endDate: { sort: 'desc', nulls: 'first' } }],
   });
   const mc = contracts.find((c) => c.package.category === 'member');
@@ -276,7 +277,7 @@ async function scanMemberView(memberId: string, branchId: string, todayStr: stri
       branch,
       contract_id: mc?.id ?? null,
       checkin_before: mc?.package.checkinBefore ?? null,
-      debt_contract: debtC ? { id: debtC.id, code: debtC.code, amount: debtC.totalAmount - debtC.paidAmount } : null,
+      debt_contract: debtC ? { id: debtC.id, code: debtC.code, amount: debtC.totalAmount - debtC.paidAmount, due_date: fmtDate(debtC.paymentDueDate), overdue_days: overdueDays(debtC, todayStr) } : null,
       pt: ptC ? { package_name: ptC.packageName ?? ptC.package.name, sessions_left: ptC.sessionsLeft, sessions_total: ptC.sessionsTotal } : null,
   };
 }

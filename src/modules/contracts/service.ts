@@ -1,6 +1,6 @@
 import type { Contract, ContractEvent, Member, Package, Payment, Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
-import { addMonths, dateOnly, fmtDate, todayVN } from '../../lib/dates';
+import { addDays, addMonths, dateOnly, fmtDate, todayVN } from '../../lib/dates';
 import { logger } from '../../lib/logger';
 
 export type Tx = Prisma.TransactionClient;
@@ -35,10 +35,28 @@ export async function addEvent(
   });
 }
 
-export async function recalcPaid(tx: Tx, contractId: string) {
+export const PAY_TERM_DAYS = 25;
+export const DEPOSIT_PCT = 0.5;
+export const depositMin = (total: number) => Math.ceil(total * DEPOSIT_PCT);
+export const isDepositContract = (c: { status: string; totalAmount: number; paidAmount: number }) =>
+  c.status !== 'cancelled' && c.totalAmount > 0 && c.paidAmount < depositMin(c.totalAmount);
+export const nextDueDate = (from = todayVN()) => addDays(dateOnly(from), PAY_TERM_DAYS);
+export function overdueDays(c: { totalAmount: number; paidAmount: number; paymentDueDate?: Date | null }, today = todayVN()) {
+  if (!c.paymentDueDate || c.paidAmount >= c.totalAmount) return 0;
+  return Math.max(0, Math.round((dateOnly(today).getTime() - c.paymentDueDate.getTime()) / 86400000));
+}
+
+/** push = a payment was just collected: a still-short contract gets a fresh +25 day deadline; fully paid clears it. */
+export async function recalcPaid(tx: Tx, contractId: string, push = false) {
   const agg = await tx.payment.aggregate({ where: { contractId, status: 'confirmed' }, _sum: { amount: true } });
   const paid = agg._sum.amount ?? 0;
-  await tx.contract.update({ where: { id: contractId }, data: { paidAmount: paid } });
+  const cur = await tx.contract.findUniqueOrThrow({ where: { id: contractId }, select: { paidAmount: true, totalAmount: true, status: true, paymentDueDate: true } });
+  const short = paid < cur.totalAmount;
+  const paymentDueDate = !short ? null : push || !cur.paymentDueDate ? nextDueDate() : cur.paymentDueDate;
+  await tx.contract.update({ where: { id: contractId }, data: { paidAmount: paid, paymentDueDate } });
+  if (push && isDepositContract(cur) && !isDepositContract({ ...cur, paidAmount: paid })) {
+    await addEvent(tx, contractId, 'deposit_converted', null, 'paid reached 50%', { paid_amount: paid, total_amount: cur.totalAmount });
+  }
   return paid;
 }
 
@@ -245,6 +263,9 @@ export function contractToApi(c: Full, extra: Extra = {}) {
     discount: c.discount,
     paid_amount: c.paidAmount,
     debt_amount: Math.max(0, c.totalAmount - c.paidAmount),
+    due_date: fmtDate(c.paymentDueDate),
+    overdue_days: overdueDays(c),
+    is_deposit: isDepositContract(c),
     start_date: fmtDate(c.startDate),
     end_date: fmtDate(c.endDate),
     sessions_total: c.sessionsTotal,

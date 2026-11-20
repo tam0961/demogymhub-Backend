@@ -11,7 +11,7 @@ import { branchAllowed, can } from '../rbac/service';
 import { contractPdf } from './pdf';
 import { notifyContract } from '../zalo/service';
 import { nextContractCode } from './codes';
-import { addEvent, contractToApi, isPtCategory, lastPaymentDates, lastPaymentMethods, lockContract, syncMemberStatus, type Tx } from './service';
+import { PAY_TERM_DAYS, addEvent, contractToApi, isPtCategory, lastPaymentDates, lastPaymentMethods, lockContract, nextDueDate, syncMemberStatus, type Tx } from './service';
 
 export const contractsRouter = Router();
 contractsRouter.use(authenticate);
@@ -209,6 +209,7 @@ contractsRouter.post('/', authorize('contracts.create'), async (req, res) => {
         sessionsTotal: eff.sessions,
         sessionsLeft: eff.sessions,
         renewedFromId,
+        paymentDueDate: total > 0 ? nextDueDate() : null,
         note: b.note ?? null,
         createdBy: userId,
       },
@@ -366,7 +367,7 @@ contractsRouter.post('/:id/activate', authorize('contracts.activate'), async (re
     const end = f.durationDays ? addDays(start, f.durationDays) : null;
     const u = await tx.contract.update({
       where: { id },
-      data: { status: 'active', startDate: start, endDate: end, activatedAt: new Date() },
+      data: { status: 'active', startDate: start, endDate: end, activatedAt: new Date(), ...(f.paidAmount < f.totalAmount && !f.paymentDueDate && { paymentDueDate: addDays(start, PAY_TERM_DAYS) }) },
       include: { member: true, package: true },
     });
     await addEvent(tx, id, 'activated', userId, b.allow_debt && f.paidAmount < f.totalAmount ? 'activated with debt' : null, {
@@ -437,6 +438,7 @@ contractsRouter.post('/:id/renew', authorize('contracts.create'), async (req, re
         sessionsLeft: pkg.sessions,
         startDate: start,
         renewedFromId: old.id,
+        paymentDueDate: priceOf(pkg, 0) > 0 ? nextDueDate() : null,
         createdBy: userId,
       },
       include: { member: true, package: true },

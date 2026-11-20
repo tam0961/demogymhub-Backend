@@ -1,10 +1,10 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import type { Prisma } from '@prisma/client';
-import { DATE_RE, addDays, dateOnly, dayRange, todayVN, vnDayOf } from '../../lib/dates';
+import { DATE_RE, addDays, dateOnly, dayRange, fmtDate, todayVN, vnDayOf } from '../../lib/dates';
 import { prisma } from '../../lib/prisma';
 import { authenticate, authorize, authorizeAny } from '../../middlewares/auth';
-import { paymentToApi } from '../contracts/service';
+import { overdueDays, paymentToApi } from '../contracts/service';
 import { branchFilter } from '../rbac/scope';
 
 export const reportsRouter = Router();
@@ -117,7 +117,7 @@ reportsRouter.get('/today-tasks', authorize('contracts.read'), async (req, res) 
     prisma.contract.findMany({ where: { ...bf, status: 'draft' }, orderBy: { createdAt: 'asc' }, take: LIMIT, select: { id: true, code: true, ...who } }),
     prisma.contract.findMany({
       where: { ...bf, status: { in: ['signed', 'active', 'frozen'] } },
-      select: { id: true, code: true, totalAmount: true, paidAmount: true, ...who },
+      select: { id: true, code: true, totalAmount: true, paidAmount: true, paymentDueDate: true, ...who },
     }),
     prisma.contract.count({ where: expWhere }),
     prisma.contract.findMany({
@@ -136,9 +136,9 @@ reportsRouter.get('/today-tasks', authorize('contracts.read'), async (req, res) 
   ]);
 
   const debtors = unpaidRows
-    .map((c) => ({ id: c.id, code: c.code, member_name: c.member.name, debt_amount: c.totalAmount - c.paidAmount }))
+    .map((c) => ({ id: c.id, code: c.code, member_name: c.member.name, debt_amount: c.totalAmount - c.paidAmount, due_date: fmtDate(c.paymentDueDate), overdue_days: overdueDays(c) }))
     .filter((c) => c.debt_amount > 0)
-    .sort((a, b) => b.debt_amount - a.debt_amount);
+    .sort((a, b) => b.overdue_days - a.overdue_days || b.debt_amount - a.debt_amount);
 
   res.json({
     data: {

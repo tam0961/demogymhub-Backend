@@ -295,6 +295,7 @@ model Contract {
   signatureData String?        @map("signature_data")
   activatedAt   DateTime?      @map("activated_at") @db.Timestamptz
   frozenUntil   DateTime?      @map("frozen_until") @db.Date
+  paymentDueDate DateTime?     @map("payment_due_date") @db.Date
   renewedFromId String?        @map("renewed_from_id") @db.Uuid
   bundleOfId    String?        @map("bundle_of_id") @db.Uuid
   packageName   String?        @map("package_name")

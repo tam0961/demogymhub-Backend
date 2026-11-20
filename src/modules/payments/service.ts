@@ -25,7 +25,7 @@ export async function confirmPayment(paymentId: string, byUser: string | null, s
     });
     const fresh = await tx.payment.findUniqueOrThrow({ where: { id: p.id } });
     if (!r.count) return { payment: fresh, replay: true };
-    const paid = await recalcPaid(tx, contractId);
+    const paid = await recalcPaid(tx, contractId, true);
     await addEvent(tx, contractId, 'payment_confirmed', byUser, source, { payment_id: p.id, amount: p.amount, method: p.method, paid_amount: paid });
     return { payment: fresh, replay: false };
   });
