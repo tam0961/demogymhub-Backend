@@ -6,9 +6,11 @@ import { prisma } from '../../lib/prisma';
 import { authenticate, authorize, authorizeAny } from '../../middlewares/auth';
 import { paymentToApi } from '../contracts/service';
 import { branchFilter } from '../rbac/scope';
+import { statsRouter } from './stats';
 
 export const reportsRouter = Router();
 reportsRouter.use(authenticate);
+reportsRouter.use(statsRouter);
 
 const q = z.object({ branch_id: z.string().uuid().optional(), date: z.string().regex(DATE_RE).optional() });
 const METHODS = ['cash', 'transfer', 'vietqr', 'ewallet', 'card'] as const;
