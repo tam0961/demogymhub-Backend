@@ -160,6 +160,7 @@ export const SAMPLE_VARS: Record<string, string> = {
   days_left: '7',
   pt_name: 'PT Khanh',
   session_time: '18:00 19/11/2026',
+  sessions_left: '12',
   gym_name: 'TH Gym',
 };
 
@@ -182,14 +183,14 @@ export async function notifyContract(contractId: string) {
 
 export async function notifyPtDone(sessionId: string) {
   try {
-    const s = await prisma.ptSession.findUnique({ where: { id: sessionId }, include: { member: true, trainer: true } });
+    const s = await prisma.ptSession.findUnique({ where: { id: sessionId }, include: { member: true, trainer: true, contract: { select: { sessionsLeft: true } } } });
     if (!s || !s.member) return;
     await sendZns({
       event: 'pt_signed',
       dedupeKey: `pt_signed:${s.id}`,
       memberId: s.memberId,
       phone: s.member.phone,
-      vars: { customer_name: s.member.name, pt_name: s.trainer.name, session_time: fmtTimeVN(s.startAt), gym_name: 'TH Gym' },
+      vars: { customer_name: s.member.name, pt_name: s.trainer.name, session_time: fmtTimeVN(s.startAt), sessions_left: String(s.contract?.sessionsLeft ?? 0), gym_name: 'TH Gym' },
     });
   } catch (e) {
     logger.error({ err: e }, 'notifyPtDone failed');
