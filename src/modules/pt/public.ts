@@ -6,6 +6,7 @@ import { conflict, HttpError, notFound } from '../../lib/errors';
 import { prisma } from '../../lib/prisma';
 import { hit, redis } from '../../lib/redis';
 import { ptEligibility } from '../contracts/service';
+import { enqueueSheetWrites } from '../sheetsync/write';
 import { lockAt, registerInTx } from './classes';
 import { normalizePhone } from './sheet-import';
 
@@ -110,11 +111,11 @@ publicRouter.post('/book', async (req, res) => {
   try {
     const booked = await prisma.$transaction(async (tx) => {
       const failed: { class_id: string; reason: string }[] = [];
-      const done: { class_id: string; start_at: Date; end_at: Date; muscle_group: string | null }[] = [];
+      const done: { reg_id: string; class_id: string; start_at: Date; end_at: Date; muscle_group: string | null }[] = [];
       for (const id of ids) {
         try {
           const reg = await registerInTx(tx, { classId: id, member, createdBy: null, source: 'web', lockCheck });
-          done.push({ class_id: id, start_at: reg.class.startAt, end_at: reg.class.endAt, muscle_group: reg.class.muscleGroup });
+          done.push({ reg_id: reg.id, class_id: id, start_at: reg.class.startAt, end_at: reg.class.endAt, muscle_group: reg.class.muscleGroup });
         } catch (e) {
           if (e instanceof HttpError) failed.push({ class_id: id, reason: REASON[e.code] ?? 'error' });
           else throw e;
@@ -123,6 +124,7 @@ publicRouter.post('/book', async (req, res) => {
       if (failed.length) throw new BookFailed(failed);
       return done;
     });
+    void enqueueSheetWrites(booked.map((c) => c.reg_id));
     res.status(201).json({
       data: { name: member.name, booked: booked.map((c) => ({ class_id: c.class_id, date: vnDayOf(c.start_at), start: hm(c.start_at), end: hm(c.end_at), muscle_group: c.muscle_group })) },
     });

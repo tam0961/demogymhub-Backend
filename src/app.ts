@@ -24,6 +24,7 @@ import { reportsRouter } from './modules/reports/routes';
 import { leadsInboxRouter } from './modules/leads/inbox';
 import { leadsRouter } from './modules/leads/routes';
 import { shiftsRouter } from './modules/shifts/routes';
+import { sheetSyncRouter } from './modules/sheetsync/routes';
 import { zaloRouter } from './modules/zalo/routes';
 import { mkPublicRouter } from './modules/marketing/auto-routes';
 import { marketingRouter, sheetsRouter } from './modules/marketing/routes';
@@ -108,6 +109,7 @@ export function createApp() {
   app.use('/api/leads', leadsInboxRouter);
   app.use('/api/leads', leadsRouter);
   app.use('/api/zalo', zaloRouter);
+  app.use('/api/sheetsync', sheetSyncRouter);
   app.use('/api/marketing', marketingRouter);
   app.use('/api/settings/sheets', sheetsRouter);
   app.use('/api/settings/print-templates', printRouter);

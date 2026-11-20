@@ -10,6 +10,7 @@ import { addEvent, lockContract, ptEligibility, ptUsable, type Tx } from '../con
 import { branchFilter, writeBranch } from '../rbac/scope';
 import { branchAllowed } from '../rbac/service';
 import { assertTrainer, lockKey, ownOnly } from './shared';
+import { enqueueSheetWrites } from '../sheetsync/write';
 
 export const classesRouter = Router();
 
@@ -401,6 +402,7 @@ classesRouter.post('/:id/registrations', authorize('pt_sessions.create'), async 
     registerInTx(tx, { classId: cls.id, member, createdBy: req.auth!.userId, source: 'manual', waitlist: true, lockCheck: (startAt) => assertOpen(req, startAt) }),
   );
   await audit(req.auth!.userId, 'group_registration.created', { after: regToApi(reg) }, req.ip, reg.id);
+  void enqueueSheetWrites([reg.id]);
   res.status(201).json({ data: regToApi(reg) });
 });
 
