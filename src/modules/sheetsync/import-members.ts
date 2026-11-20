@@ -41,6 +41,8 @@ export interface ImportResult {
   counts: { exists: number; created: number; contracts: number; skipped: number; other_packages: number };
 }
 
+const FROM = 'àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ';
+const TO = Array.from(FROM, (c) => c.normalize('NFD').replace(/đ/g, 'd').replace(/[̀-ͯ]/g, '')).join('');
 const GENERIC = 'PT nhóm (nhập từ Sheet)';
 const PKG_10 = 'PT NHÓM 10 BUỔI';
 const PKG_20 = 'PT NHÓM 20 BUỔI';
@@ -59,7 +61,20 @@ export function packageFor(total: number): { name: string; promo: number; generi
   return { name: GENERIC, promo: 0, generic: true };
 }
 
-export function planImport(rows: SheetMemberRow[], existing: Set<string>, today: string): ImportItem[] {
+const fold = (v: string) =>
+  v
+    .normalize('NFD')
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'D')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z ]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+export const foldName = fold;
+
+export function planImport(rows: SheetMemberRow[], existing: Set<string>, today: string, existingNames: Set<string> = new Set()): ImportItem[] {
   const seen = new Set<string>();
   const out: ImportItem[] = [];
   for (const r of rows) {
@@ -81,6 +96,10 @@ export function planImport(rows: SheetMemberRow[], existing: Set<string>, today:
     seen.add(phone);
     if (existing.has(phone)) {
       out.push({ ...base, ...empty, action: 'exists', reason: 'Đã có hội viên trong app, giữ nguyên' });
+      continue;
+    }
+    if (existingNames.has(fold(base.name))) {
+      out.push({ ...base, ...empty, action: 'exists', reason: 'Đã có hội viên cùng tên trong app (khác số điện thoại), giữ nguyên, bạn kiểm tra lại số' });
       continue;
     }
     const learned = intOf(r.learned);
@@ -121,7 +140,11 @@ export async function importSheetMembers(rows: SheetMemberRow[], opts: { dryRun:
   const today = todayVN();
   const phones = rows.map((r) => normalizePhone(r.phone || '')).filter(Boolean);
   const known = await prisma.member.findMany({ where: { phone: { in: phones } }, select: { phone: true } });
-  const items = planImport(rows, new Set(known.map((k) => k.phone)), today);
+  const names = [...new Set(rows.map((r) => fold(r.name || '')).filter(Boolean))];
+  const byName = names.length
+    ? await prisma.$queryRaw<{ f: string }[]>`SELECT DISTINCT regexp_replace(translate(lower(name), ${FROM}, ${TO}), '[^a-z ]', '', 'g') AS f FROM members WHERE regexp_replace(translate(lower(name), ${FROM}, ${TO}), '[^a-z ]', '', 'g') = ANY(${names}::text[])`
+    : [];
+  const items = planImport(rows, new Set(known.map((k) => k.phone)), today, new Set(byName.map((b) => b.f)));
   const counts = { exists: 0, created: 0, contracts: 0, skipped: 0, other_packages: 0 };
   for (const it of items) {
     if (it.action === 'exists') counts.exists++;

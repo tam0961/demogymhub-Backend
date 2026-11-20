@@ -78,6 +78,15 @@ describe('import every Sheet member', () => {
     expect(again.counts).toMatchObject({ exists: 6, created: 0, contracts: 0 });
   });
 
+  it('does not duplicate a member that exists under the same name with another phone', async () => {
+    await prisma.member.create({ data: { code: `IMN${sfx}`, name: 'Cao Trần Nguyễn Tiên', phone: ph(30), branchId: BR, gender: 'female' } });
+    const rows = [row(31, '6', '5', { name: 'CAO TRẦN NGUYỄN TIÊN' }), row(32, '10', '0', { name: `Khac ${sfx}` })];
+    const r = await importSheetMembers(rows, { dryRun: true, createdBy: null });
+    expect(r.items[0]).toMatchObject({ action: 'exists' });
+    expect(r.items[0].reason).toContain('cùng tên');
+    expect(r.items[1].action).toBe('create');
+  });
+
   it('exposes the import through the API and reads the Sheet dump', async () => {
     await patchSheetSyncCfg({ dumpUrl: 'https://script.google.com/macros/s/AKfycbTEST/exec', secret: 'S3CRET', branchId: BR });
     const members = [[`Api ${sfx}`, ph(20).slice(1), `api.${sfx}@example.test`, '31/12/2031', '5', '5', '01/12/2030', '0', '']];
