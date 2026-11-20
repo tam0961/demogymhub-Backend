@@ -20,7 +20,7 @@ const deps = {
     return true;
   },
 };
-const cfg: BotCfg = { enabled: true, token: 'T', botName: 'Bot AI TH Gym', ptGroup: '', branchId: '', groupTrainer: '', groupWindows: '', cleanOn: false, cleanGroup: '', cleanTpl: {}, shootOn: true, shootGroup: 'sg', shootBoss: 'emma' };
+const cfg: BotCfg = { enabled: true, token: 'T', botName: 'Bot AI TH Gym', ptGroup: '', branchId: '', groupTrainer: '', groupWindows: '', cleanOn: false, cleanGroup: '', cleanTpl: {}, shootOn: true, shootGroup: 'sg', shootBoss: 'emma', ptTpl: {}, shootTpl: {} };
 const at = (date: string, h: number, mi = 0, dow = 1) => ({ date, h, mi, dow });
 
 beforeAll(async () => {
@@ -89,5 +89,12 @@ describe('shoot group bot', () => {
     expect(sent[0]).toContain('1/ PT Trang :');
     await runShootReminders(cfg, deps, at('2031-03-18', 8, 5, 2));
     expect(sent).toHaveLength(1);
+  });
+
+  it('renders edited shoot templates', async () => {
+    const mine = { ...cfg, shootTpl: { form: 'Form tuan {week}: {list} / {bot}', remind: 'Mai {when}: {list} ({status})' } };
+    sent.length = 0;
+    await runShootReminders(mine, deps, at('2031-03-25', 8, 0, 2));
+    expect(sent[0]).toBe('Form tuan 24/03 đến 30/03: 1/ PT Trang :' + String.fromCharCode(10) + '2/ PT Thịnh : / Bot AI TH Gym');
   });
 });

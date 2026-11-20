@@ -100,6 +100,21 @@ describe('zalo bot in the PT group', () => {
     expect(st.body.data.state.chats.map((c: { id: string }) => c.id)).toEqual(expect.arrayContaining(['other-chat', group]));
   });
 
+  it('uses edited reminder templates for the PT group', async () => {
+    stubZalo();
+    sent.length = 0;
+    const put = await request(app)
+      .put('/api/zalo/bot/config')
+      .set({ Authorization: `Bearer ${ownerToken}` })
+      .send({ enabled: true, bot_name: 'Bot AI TH Gym', pt_group: group, branch_id: A, group_trainer: 'Thinh', group_windows: '06:30-07:45, 20:00-21:15', pt_tpl: { off: 'OFF nhe {bot}', tomorrow: 'Mai {dow} {date}{NL}{list}' } });
+    expect(put.status).toBe(200);
+    expect(put.body.data.pt_tpl.off).toBe('OFF nhe {bot}');
+    expect(put.body.data.pt_tpl.today).toContain('{list}');
+    await runReminders(new Date('2030-02-03T20:00:00+07:00'));
+    expect(sent[0].text).toBe('OFF nhe Bot AI TH Gym');
+    await request(app).put('/api/zalo/bot/config').set({ Authorization: `Bearer ${ownerToken}` }).send({ enabled: true, bot_name: 'Bot AI TH Gym', pt_group: group, branch_id: A, group_trainer: 'Thinh', group_windows: '06:30-07:45, 20:00-21:15', pt_tpl: {} }).expect(200);
+  });
+
   it('applies a weekly OFF message to the days of that week', async () => {
     stubZalo();
     const cfg = await getBotCfg();

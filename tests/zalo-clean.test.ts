@@ -22,7 +22,7 @@ const deps = {
 };
 const at = (date: string, h: number, mi: number) => ({ date, h, mi });
 const cfgOn = (over: Partial<BotCfg> = {}): BotCfg => ({
-  enabled: true, token: 'T', botName: 'Bot AI TH Gym', ptGroup: '', branchId: '', groupTrainer: '', groupWindows: '', cleanOn: true, cleanGroup: `cg${sfx}`, cleanTpl: {}, shootOn: false, shootGroup: '', shootBoss: 'emma', ...over,
+  enabled: true, token: 'T', botName: 'Bot AI TH Gym', ptGroup: '', branchId: '', groupTrainer: '', groupWindows: '', cleanOn: true, cleanGroup: `cg${sfx}`, cleanTpl: {}, shootOn: false, shootGroup: '', shootBoss: 'emma', ptTpl: {}, shootTpl: {}, ...over,
 });
 
 beforeAll(async () => {

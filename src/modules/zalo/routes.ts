@@ -4,7 +4,7 @@ import { audit } from '../../lib/audit';
 import { badRequest } from '../../lib/errors';
 import { prisma } from '../../lib/prisma';
 import { authenticate, authorize } from '../../middlewares/auth';
-import { CLEAN_TPL_KEYS, getBotCfg, getBotState, publicBotCfg, saveBotCfg, parseWindows, type CleanTplKey } from '../zalobot/config';
+import { CLEAN_TPL_KEYS, PT_TPL_KEYS, SHOOT_TPL_KEYS, getBotCfg, getBotState, publicBotCfg, saveBotCfg, parseWindows, type CleanTplKey, type PtTplKey, type ShootTplKey } from '../zalobot/config';
 import { sendText, zaloApi } from '../zalobot/service';
 import { branchAllowed } from '../rbac/service';
 import { getZns, publicZns, saveZns, sendZns, sendExpiryReminders, SAMPLE_VARS, ZNS_EVENTS } from './service';
@@ -86,6 +86,8 @@ const botSchema = z.object({
   shoot_on: z.boolean().optional(),
   shoot_group: z.string().trim().max(100).optional(),
   shoot_boss: z.string().trim().min(1).max(40).optional(),
+  pt_tpl: z.record(z.string(), z.string().max(2000)).optional(),
+  shoot_tpl: z.record(z.string(), z.string().max(2000)).optional(),
 });
 
 zaloRouter.get('/bot/config', async (_req, res) => {
@@ -114,6 +116,16 @@ zaloRouter.put('/bot/config', async (req, res) => {
   if (b.shoot_on !== undefined) {
     if (b.shoot_on && (!cfg.token || !cfg.shootGroup)) throw badRequest('SHOOT_INCOMPLETE', 'Token and shoot group are required to turn the shoot bot on');
     cfg.shootOn = b.shoot_on;
+  }
+  if (b.pt_tpl) {
+    const tpl: Partial<Record<PtTplKey, string>> = {};
+    for (const k of PT_TPL_KEYS) if (typeof b.pt_tpl[k] === 'string') tpl[k] = b.pt_tpl[k];
+    cfg.ptTpl = tpl;
+  }
+  if (b.shoot_tpl) {
+    const tpl: Partial<Record<ShootTplKey, string>> = {};
+    for (const k of SHOOT_TPL_KEYS) if (typeof b.shoot_tpl[k] === 'string') tpl[k] = b.shoot_tpl[k];
+    cfg.shootTpl = tpl;
   }
   if (b.clean_tpl) {
     const tpl: Partial<Record<CleanTplKey, string>> = {};

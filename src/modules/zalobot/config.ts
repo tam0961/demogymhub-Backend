@@ -15,6 +15,8 @@ export interface BotCfg {
   shootOn: boolean;
   shootGroup: string;
   shootBoss: string;
+  ptTpl: Partial<Record<PtTplKey, string>>;
+  shootTpl: Partial<Record<ShootTplKey, string>>;
 }
 
 export const CLEAN_TPL_KEYS = ['morning', 'afternoon', 'leaf', 'hourly', 'done', 'late'] as const;
@@ -79,6 +81,8 @@ const freshCfg = (): BotCfg => ({
   shootOn: false,
   shootGroup: '',
   shootBoss: 'emma',
+  ptTpl: {},
+  shootTpl: {},
 });
 
 export async function getBotCfg(): Promise<BotCfg> {
@@ -120,6 +124,10 @@ export function publicBotCfg(c: BotCfg) {
     shoot_on: c.shootOn,
     shoot_group: c.shootGroup,
     shoot_boss: c.shootBoss,
+    pt_tpl: ptTemplates(c),
+    pt_tpl_default: PT_TPL_DEFAULT,
+    shoot_tpl: shootTemplates(c),
+    shoot_tpl_default: SHOOT_TPL_DEFAULT,
   };
 }
 
@@ -141,3 +149,32 @@ export function cleanTemplates(c: Pick<BotCfg, 'cleanTpl'>): Record<CleanTplKey,
   }
   return out;
 }
+
+export const PT_TPL_KEYS = ['off', 'today', 'missing', 'tomorrow'] as const;
+export type PtTplKey = (typeof PT_TPL_KEYS)[number];
+export const PT_TPL_DEFAULT: Record<PtTplKey, string> = {
+  off: lines('📅 Nhắc lịch OFF: Anh chị PT báo giúp em lịch off tuần mới ạ. Chúc Anh/Chị cuối tuần vui vẻ !', 'Lưu ý nhớ tag tên "{bot}"'),
+  today: lines('Anh Chị PT báo ca hôm nay giúp e ạ', '🍀 CA DẠY HÔM NAY 🍀', '{list}', '', 'Nhớ gõ @ rồi chọn "{bot}" để bot đọc được.'),
+  missing: '⚠️ Anh Chị PT quên chưa báo ca dạy hôm nay ({date}) ạ : {names} vui lòng báo ca theo mẫu "CA DẠY" trong nhóm, nhớ tag "{bot}"',
+  tomorrow: lines('🍀 CA LỚP NHÓM NGÀY MAI 🍀', '{dow} {date}', '', '{list}'),
+};
+
+export const SHOOT_TPL_KEYS = ['form', 'remind', 'confirmed'] as const;
+export type ShootTplKey = (typeof SHOOT_TPL_KEYS)[number];
+const SEP_LINE = '-----------';
+export const SHOOT_TPL_DEFAULT: Record<ShootTplKey, string> = {
+  form: lines('🎬 ĐĂNG KÝ LỊCH QUAY VỚI EMMA', 'Tuần {week}', SEP_LINE, '{list}', SEP_LINE, 'Ví dụ: Trang : thứ 4 14h', 'Nhớ tag "{bot}" ạ'),
+  remind: lines('🎬 NHẮC LỊCH QUAY {when}', '{list}', SEP_LINE, '{status}'),
+  confirmed: lines('✅ EMMA ĐÃ XÁC NHẬN', 'Tuần {week}', SEP_LINE, '{list}{missing}'),
+};
+
+function merged<K extends string>(def: Record<K, string>, over: Partial<Record<K, string>> | undefined): Record<K, string> {
+  const out = { ...def };
+  for (const k of Object.keys(def) as K[]) {
+    const v = over?.[k];
+    if (typeof v === 'string' && v.trim()) out[k] = v;
+  }
+  return out;
+}
+export const ptTemplates = (c: Pick<BotCfg, 'ptTpl'>) => merged(PT_TPL_DEFAULT, c.ptTpl);
+export const shootTemplates = (c: Pick<BotCfg, 'shootTpl'>) => merged(SHOOT_TPL_DEFAULT, c.shootTpl);

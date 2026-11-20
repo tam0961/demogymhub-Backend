@@ -1,6 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
-import type { BotCfg } from './config';
+import { renderTpl } from './clean';
+import { shootTemplates, type BotCfg } from './config';
 
 const NL = String.fromCharCode(10);
 const SEP = `${NL}-----------${NL}`;
@@ -129,10 +130,13 @@ const template = (cfg: BotCfg, week: string, list: ShootPt[], head: string, note
   );
 const ask = (cfg: BotCfg) => lines('Emma xác nhận giúp em: nhắn "xác nhận" (nhớ tag "' + cfg.botName + '")', 'Cần đổi lịch: nhắn "Đổi lịch Trang" hoặc "Đổi lịch Thịnh"');
 const pre = (cfg: BotCfg, items: { p: ShootPt; r: { date: string; minutes: number } }[], conf: boolean, when: string) =>
-  sec(
-    lines(`🎬 NHẮC LỊCH QUAY ${when.toUpperCase()}`, items.map((i) => shootLine(i.p, i.r)).join(NL)),
-    conf ? `Emma và ${calls(items.map((i) => i.p))} nhớ chuẩn bị nha ạ.` : `Emma chưa xác nhận: nhắn "xác nhận" (nhớ tag "${cfg.botName}")`,
-  );
+  renderTpl(shootTemplates(cfg).remind, {
+    when: when.toUpperCase(),
+    list: items.map((i) => shootLine(i.p, i.r)).join(NL),
+    status: conf ? `Emma và ${calls(items.map((i) => i.p))} nhớ chuẩn bị nha ạ.` : `Emma chưa xác nhận: nhắn "xác nhận" (nhớ tag "${cfg.botName}")`,
+    bot: cfg.botName,
+  });
+const formText = (cfg: BotCfg, week: string, list: ShootPt[]) => renderTpl(shootTemplates(cfg).form, { week: weekTxt(week), list: list.map((p, i) => `${i + 1}/ ${p.call} :`).join(NL), bot: cfg.botName });
 
 /** A message in the shoot group: PTs fill the form, Emma confirms or asks to change. */
 export async function handleShoot(cfg: BotCfg, deps: ShootDeps, m: ShootMsg, now: Now) {
@@ -161,7 +165,7 @@ export async function handleShoot(cfg: BotCfg, deps: ShootDeps, m: ShootMsg, now
         return;
       }
       await deps.once(confKey(week));
-      await deps.say(sec(lines('✅ EMMA ĐÃ XÁC NHẬN', `Tuần ${weekTxt(week)}`), summary(st.rows), st.miss.length ? `Còn thiếu: ${calls(st.miss)}` : undefined));
+      await deps.say(renderTpl(shootTemplates(cfg).confirmed, { week: weekTxt(week), list: summary(st.rows), missing: st.miss.length ? `${NL}${SEP.trim()}${NL}Còn thiếu: ${calls(st.miss)}` : '', bot: cfg.botName }));
     }
   }
   const items = parseShootLines(m.text);
@@ -236,6 +240,6 @@ export async function runShootReminders(cfg: BotCfg, deps: ShootDeps, now: Now) 
   const st = await state(week);
   if (!st.miss.length && st.conf) return;
   if (!(await deps.once(`shoot:${now.date}:${now.h}`))) return;
-  if (st.miss.length) await deps.say(template(cfg, week, st.miss, '🎬 ĐĂNG KÝ LỊCH QUAY VỚI EMMA'));
+  if (st.miss.length) await deps.say(formText(cfg, week, st.miss));
   else await deps.say(sec(lines('🎬 ĐÃ ĐỦ LỊCH QUAY', `Tuần ${weekTxt(week)}`), summary(st.rows), ask(cfg)));
 }

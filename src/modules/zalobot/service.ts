@@ -4,9 +4,9 @@ import { prisma } from '../../lib/prisma';
 import { redis } from '../../lib/redis';
 import { applyShiftMessage, branchTrainers } from '../pt/shift-message';
 import { cleanName, fmtDM, lastWord } from '../pt/zalo-shift';
-import { handleCleanText, runCleanReminders } from './clean';
+import { handleCleanText, renderTpl, runCleanReminders } from './clean';
 import { handleShoot, runShootReminders } from './shoot';
-import { getBotCfg, getBotState, patchBotState, type BotCfg } from './config';
+import { PT_TPL_DEFAULT, getBotCfg, getBotState, patchBotState, ptTemplates, type BotCfg } from './config';
 
 const API = 'https://bot-api.zaloplatforms.com';
 const MENTION = /@\s*bot\s*ai\s*th\s*gym/gi;
@@ -148,7 +148,7 @@ export async function handleUpdate(cfg: BotCfg, it: Update) {
 
 const DOW = ['Chủ nhật', 'Thứ hai', 'Thứ ba', 'Thứ tư', 'Thứ năm', 'Thứ sáu', 'Thứ bảy'];
 
-export async function groupClassText(branchId: string, date: string): Promise<string> {
+export async function groupClassText(branchId: string, date: string, tpl: string = PT_TPL_DEFAULT.tomorrow): Promise<string> {
   const day = dayRange(date);
   const classes = await prisma.groupClass.findMany({
     where: { branchId, status: { not: 'cancelled' }, startAt: { gte: day.gte, lt: day.lt } },
@@ -165,7 +165,7 @@ export async function groupClassText(branchId: string, date: string): Promise<st
     return `${hm} ${c.muscleGroup?.trim() || 'Lớp nhóm'}\nSố lượng học viên: ${count}\nPT phụ trách: ${c.trainer?.name ?? 'chưa có PT'}`;
   });
   const dow = new Date(`${date}T12:00:00Z`).getUTCDay();
-  return `🍀 CA LỚP NHÓM NGÀY MAI 🍀\n${DOW[dow]} ${fmtDM(date)}\n\n${blocks.join('\n------------\n')}`;
+  return renderTpl(tpl, { dow: DOW[dow], date: fmtDM(date), list: blocks.join(String.fromCharCode(10) + '------------' + String.fromCharCode(10)) });
 }
 
 const tagOf = (name: string) => `@${name.trim().split(/\s+/).pop()}`;
@@ -187,8 +187,9 @@ export async function runReminders(now = new Date()) {
   const t = vnParts(now);
   if (t.mi >= 5) return;
   const say = (text: string) => sendText(cfg, cfg.ptGroup, text);
+  const tpl = ptTemplates(cfg);
   if (t.dow === 0 && t.h === 20 && (await once(`off:${t.date}`))) {
-    await say(`📅 Nhắc lịch OFF: Anh chị PT báo giúp em lịch off tuần mới ạ. Chúc Anh/Chị cuối tuần vui vẻ !\nLưu ý nhớ tag tên "${cfg.botName}"`);
+    await say(renderTpl(tpl.off, { bot: cfg.botName }));
   }
   if (t.h === 7 && (await once(`today:${t.date}`))) {
     const trainers = await branchTrainers(cfg.branchId);
@@ -205,16 +206,16 @@ export async function runReminders(now = new Date()) {
         return `${i + 1}/ ${p.name} :${fill ? ` ${fill}` : ''}`;
       })
       .join('\n');
-    await say(`Anh Chị PT báo ca hôm nay giúp e ạ\n🍀 CA DẠY HÔM NAY 🍀\n${list}\n\nNhớ gõ @ rồi chọn "${cfg.botName}" để bot đọc được.`);
+    await say(renderTpl(tpl.today, { list, bot: cfg.botName }));
   }
   if (t.h === 8 && (await once(`chk:${t.date}`))) {
     const miss = await missingFor(cfg.branchId, t.date);
     if (miss.length) {
-      await say(`⚠️ Anh Chị PT quên chưa báo ca dạy hôm nay (${fmtDM(t.date)}) ạ : ${miss.map((p) => tagOf(p.name)).join(' ')} vui lòng báo ca theo mẫu "CA DẠY" trong nhóm, nhớ tag "${cfg.botName}"`);
+      await say(renderTpl(tpl.missing, { date: fmtDM(t.date), names: miss.map((p) => tagOf(p.name)).join(' '), bot: cfg.botName }));
     }
   }
   if (t.h === 21 && t.dow !== 6) {
-    const text = await groupClassText(cfg.branchId, addDays(t.date, 1));
+    const text = await groupClassText(cfg.branchId, addDays(t.date, 1), tpl.tomorrow);
     if (text && (await once(`gcls:${t.date}`))) await say(text);
   }
 }
