@@ -153,13 +153,14 @@ export function cleanTemplates(c: Pick<BotCfg, 'cleanTpl'>): Record<CleanTplKey,
   return out;
 }
 
-export const PT_TPL_KEYS = ['off', 'today', 'missing', 'tomorrow'] as const;
+export const PT_TPL_KEYS = ['off', 'today', 'missing', 'tomorrow', 'report'] as const;
 export type PtTplKey = (typeof PT_TPL_KEYS)[number];
 export const PT_TPL_DEFAULT: Record<PtTplKey, string> = {
   off: lines('📅 Nhắc lịch OFF: Anh chị PT báo giúp em lịch off tuần mới ạ. Chúc Anh/Chị cuối tuần vui vẻ !', 'Lưu ý nhớ tag tên "{bot}"'),
   today: lines('Anh Chị PT báo ca hôm nay giúp e ạ', '🍀 CA DẠY HÔM NAY 🍀', '{list}', '', 'Nhớ gõ @ rồi chọn "{bot}" để bot đọc được.'),
   missing: '⚠️ Anh Chị PT quên chưa báo ca dạy hôm nay ({date}) ạ : {names} vui lòng báo ca theo mẫu "CA DẠY" trong nhóm, nhớ tag "{bot}"',
   tomorrow: lines('🍀 CA LỚP NHÓM NGÀY MAI 🍀', '{dow} {date}', '', '{list}'),
+  report: lines('📊 BÁO CÁO TỔNG HỢP THÁNG {month}', 'Anh Chị xem báo cáo tại đây:', '{link}'),
 };
 
 export const SHOOT_TPL_KEYS = ['form', 'remind', 'confirmed'] as const;

@@ -7,6 +7,9 @@ import { prisma } from '../../lib/prisma';
 import { authenticate, authorize } from '../../middlewares/auth';
 import { CLEAN_TPL_KEYS, PT_TPL_KEYS, SHOOT_TPL_KEYS, getBotCfg, getBotState, publicBotCfg, saveBotCfg, parseWindows, type CleanTplKey, type PtTplKey, type ShootTplKey } from '../zalobot/config';
 import { fetchBotLabel, sendText, zaloApi } from '../zalobot/service';
+import { appsScriptCode, driveReady, ensureSecret, getReportCfg, publicReportCfg, saveReportCfg } from '../monthlyreport/config';
+import { previousMonthVN } from '../monthlyreport/data';
+import { createReportPdf, publishReport } from '../monthlyreport/service';
 import { branchAllowed } from '../rbac/service';
 import { getZns, publicZns, saveZns, sendZns, sendExpiryReminders, SAMPLE_VARS, ZNS_EVENTS } from './service';
 
@@ -87,12 +90,15 @@ const botSchema = z.object({
   shoot_on: z.boolean().optional(),
   shoot_group: z.string().trim().max(100).optional(),
   shoot_boss: z.string().trim().min(1).max(40).optional(),
+  report_on: z.boolean().optional(),
+  report_script_url: z.string().trim().max(400).optional(),
+  report_share_link: z.boolean().optional(),
   pt_tpl: z.record(z.string(), z.string().max(2000)).optional(),
   shoot_tpl: z.record(z.string(), z.string().max(2000)).optional(),
 });
 
 zaloRouter.get('/bot/config', async (_req, res) => {
-  res.json({ data: { ...publicBotCfg(await getBotCfg()), state: await getBotState() } });
+  res.json({ data: { ...publicBotCfg(await getBotCfg()), ...publicReportCfg(await getReportCfg()), state: await getBotState() } });
 });
 
 zaloRouter.put('/bot/config', async (req, res) => {
@@ -136,9 +142,20 @@ zaloRouter.put('/bot/config', async (req, res) => {
     for (const k of CLEAN_TPL_KEYS) if (typeof b.clean_tpl[k] === 'string') tpl[k] = b.clean_tpl[k];
     cfg.cleanTpl = tpl;
   }
+  const rc = await getReportCfg();
+  if (b.report_script_url !== undefined) {
+    if (b.report_script_url && !/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(b.report_script_url)) throw badRequest('SCRIPT_URL_INVALID', 'Địa chỉ Web app phải có dạng https://script.google.com/macros/s/.../exec');
+    rc.scriptUrl = b.report_script_url;
+  }
+  if (b.report_share_link !== undefined) rc.shareLink = b.report_share_link;
+  if (b.report_on !== undefined) {
+    if (b.report_on && !driveReady(rc)) throw badRequest('REPORT_INCOMPLETE', 'Cần dán địa chỉ Web app của Apps Script để bật báo cáo tháng');
+    rc.on = b.report_on;
+  }
+  await saveReportCfg(rc);
   await saveBotCfg(cfg);
   await audit(req.auth!.userId, 'zalo_bot.config_updated', { enabled: cfg.enabled, pt_group: cfg.ptGroup, branch_id: cfg.branchId }, req.ip);
-  res.json({ data: { ...publicBotCfg(cfg), state: await getBotState() } });
+  res.json({ data: { ...publicBotCfg(cfg), ...publicReportCfg(rc), state: await getBotState() } });
 });
 
 zaloRouter.post('/bot/check', async (_req, res) => {
@@ -167,6 +184,37 @@ zaloRouter.post('/bot/send-test-shoot', async (_req, res) => {
   if (!cfg.token || !cfg.shootGroup) throw badRequest('BOT_INCOMPLETE', 'Token and shoot group are required');
   const r = await sendText(cfg, cfg.shootGroup, 'Bot quay đã kết nối với DemoGym. Tin thử, anh chị có thể bỏ qua ạ.');
   res.json({ data: { ok: !!r?.ok, message: r ? (r.ok ? 'ok' : String(r.description ?? r.error_code ?? 'error')) : 'Không kết nối được Zalo' } });
+});
+
+zaloRouter.get('/bot/report-script', async (_req, res) => {
+  const c = await ensureSecret();
+  res.json({ data: { code: appsScriptCode(c.secret) } });
+});
+
+const reportBody = z.object({ month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/).optional() });
+
+zaloRouter.post('/bot/report-preview', async (req, res) => {
+  const b = reportBody.parse(req.body ?? {});
+  const month = b.month ?? previousMonthVN();
+  const pdf = await createReportPdf(month);
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="Bao-cao-thang-${month}.pdf"`);
+  res.send(pdf);
+});
+
+zaloRouter.post('/bot/report-send', async (req, res) => {
+  const b = reportBody.parse(req.body ?? {});
+  const month = b.month ?? previousMonthVN();
+  const cfg = await getBotCfg();
+  if (!cfg.token || !cfg.ptGroup) throw badRequest('BOT_INCOMPLETE', 'Token và mã nhóm PT & Sale là bắt buộc');
+  if (!driveReady(await getReportCfg())) throw badRequest('REPORT_INCOMPLETE', 'Chưa dán địa chỉ Web app Apps Script cho báo cáo tháng');
+  try {
+    const url = await publishReport(cfg, month, (t) => sendText(cfg, cfg.ptGroup, t));
+    await audit(req.auth!.userId, 'zalo_bot.report_sent', { month }, req.ip);
+    res.json({ data: { month, url } });
+  } catch (e) {
+    throw badRequest('REPORT_FAILED', e instanceof Error ? e.message : 'Không gửi được báo cáo');
+  }
 });
 
 zaloRouter.post('/bot/send-test', async (_req, res) => {

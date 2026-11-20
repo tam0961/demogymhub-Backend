@@ -5,6 +5,7 @@ import { redis } from '../../lib/redis';
 import { applyShiftMessage, branchTrainers } from '../pt/shift-message';
 import { cleanName, fmtDM, lastWord } from '../pt/zalo-shift';
 import { handleCleanText, renderTpl, runCleanReminders } from './clean';
+import { runMonthlyReport } from '../monthlyreport/service';
 import { handleShoot, runShootReminders } from './shoot';
 import { PT_TPL_DEFAULT, getBotCfg, getBotState, patchBotState, ptTemplates, type BotCfg } from './config';
 
@@ -234,6 +235,11 @@ export async function runCleanTick(now = new Date()) {
   await runCleanReminders(cfg, { say: (x) => sendText(cfg, cfg.cleanGroup, x), once }, vnParts(now));
 }
 
+export async function runReportTick(now = new Date()) {
+  const cfg = await getBotCfg();
+  await runMonthlyReport(cfg, { say: (x) => sendText(cfg, cfg.ptGroup, x), once, release: (k) => prisma.botSent.deleteMany({ where: { key: k } }) }, vnParts(now), now);
+}
+
 export async function runShootTick(now = new Date()) {
   const cfg = await getBotCfg();
   await runShootReminders(cfg, { say: (x) => sendText(cfg, cfg.shootGroup, x), once }, vnParts(now));
@@ -298,6 +304,7 @@ export function startZaloBot() {
   const timer = setInterval(() => {
     runReminders().catch((e) => logger.error({ err: e }, 'zalo bot reminders failed'));
     runCleanTick().catch((e) => logger.error({ err: e }, 'zalo bot clean reminders failed'));
+    runReportTick().catch((e) => logger.error({ err: e }, 'monthly report failed'));
     runShootTick().catch((e) => logger.error({ err: e }, 'zalo bot shoot reminders failed'));
     void prisma.botSent.deleteMany({ where: { at: { lt: new Date(Date.now() - 120 * 86400000) } } }).catch(() => undefined);
   }, 60_000);
