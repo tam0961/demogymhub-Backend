@@ -13,7 +13,7 @@ const key = (token: string) => `ipad:${token}`;
 const TOKEN_RE = /^[A-Za-z0-9_-]{20,64}$/;
 
 interface Session {
-  stage: 'idle' | 'pay' | 'sign' | 'signed';
+  stage: 'idle' | 'pay' | 'paid' | 'sign' | 'signed';
   payload: Record<string, unknown> | null;
   signature: string | null;
   paired?: boolean;
@@ -51,7 +51,7 @@ ipadRouter.post('/sessions', authorize('contracts.create'), async (_req, res) =>
 });
 
 const stageSchema = z.object({
-  stage: z.enum(['idle', 'pay', 'sign']),
+  stage: z.enum(['idle', 'pay', 'paid', 'sign']),
   payload: z.record(z.string(), z.unknown()).nullish(),
 });
 
