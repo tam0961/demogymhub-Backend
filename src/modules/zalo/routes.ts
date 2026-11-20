@@ -83,6 +83,9 @@ const botSchema = z.object({
   clean_on: z.boolean().optional(),
   clean_group: z.string().trim().max(100).optional(),
   clean_tpl: z.record(z.string(), z.string().max(2000)).optional(),
+  shoot_on: z.boolean().optional(),
+  shoot_group: z.string().trim().max(100).optional(),
+  shoot_boss: z.string().trim().min(1).max(40).optional(),
 });
 
 zaloRouter.get('/bot/config', async (_req, res) => {
@@ -101,6 +104,12 @@ zaloRouter.put('/bot/config', async (req, res) => {
   if (b.clean_on !== undefined) {
     if (b.clean_on && (!cfg.token || !cfg.cleanGroup)) throw badRequest('CLEAN_INCOMPLETE', 'Token and cleaning group are required to turn the cleaning bot on');
     cfg.cleanOn = b.clean_on;
+  }
+  if (b.shoot_group !== undefined) cfg.shootGroup = b.shoot_group;
+  if (b.shoot_boss !== undefined) cfg.shootBoss = b.shoot_boss;
+  if (b.shoot_on !== undefined) {
+    if (b.shoot_on && (!cfg.token || !cfg.shootGroup)) throw badRequest('SHOOT_INCOMPLETE', 'Token and shoot group are required to turn the shoot bot on');
+    cfg.shootOn = b.shoot_on;
   }
   if (b.clean_tpl) {
     const tpl: Partial<Record<CleanTplKey, string>> = {};
@@ -123,6 +132,13 @@ zaloRouter.post('/bot/send-test-clean', async (_req, res) => {
   const cfg = await getBotCfg();
   if (!cfg.token || !cfg.cleanGroup) throw badRequest('BOT_INCOMPLETE', 'Token and cleaning group are required');
   const r = await sendText(cfg, cfg.cleanGroup, 'Bot vệ sinh đã kết nối với DemoGym. Tin thử, anh chị có thể bỏ qua ạ.');
+  res.json({ data: { ok: !!r?.ok, message: r ? (r.ok ? 'ok' : String(r.description ?? r.error_code ?? 'error')) : 'Không kết nối được Zalo' } });
+});
+
+zaloRouter.post('/bot/send-test-shoot', async (_req, res) => {
+  const cfg = await getBotCfg();
+  if (!cfg.token || !cfg.shootGroup) throw badRequest('BOT_INCOMPLETE', 'Token and shoot group are required');
+  const r = await sendText(cfg, cfg.shootGroup, 'Bot quay đã kết nối với DemoGym. Tin thử, anh chị có thể bỏ qua ạ.');
   res.json({ data: { ok: !!r?.ok, message: r ? (r.ok ? 'ok' : String(r.description ?? r.error_code ?? 'error')) : 'Không kết nối được Zalo' } });
 });
 

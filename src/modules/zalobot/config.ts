@@ -12,6 +12,9 @@ export interface BotCfg {
   cleanOn: boolean;
   cleanGroup: string;
   cleanTpl: Partial<Record<CleanTplKey, string>>;
+  shootOn: boolean;
+  shootGroup: string;
+  shootBoss: string;
 }
 
 export const CLEAN_TPL_KEYS = ['morning', 'afternoon', 'leaf', 'hourly', 'done', 'late'] as const;
@@ -71,6 +74,9 @@ const freshCfg = (): BotCfg => ({
   cleanOn: false,
   cleanGroup: '',
   cleanTpl: {},
+  shootOn: false,
+  shootGroup: '',
+  shootBoss: 'emma',
 });
 
 export async function getBotCfg(): Promise<BotCfg> {
@@ -106,6 +112,9 @@ export function publicBotCfg(c: BotCfg) {
     clean_group: c.cleanGroup,
     clean_tpl: cleanTemplates(c),
     clean_tpl_default: CLEAN_TPL_DEFAULT,
+    shoot_on: c.shootOn,
+    shoot_group: c.shootGroup,
+    shoot_boss: c.shootBoss,
   };
 }
 
