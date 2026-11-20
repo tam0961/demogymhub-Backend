@@ -98,8 +98,12 @@ zaloRouter.put('/bot/config', async (req, res) => {
   if (b.group_windows && parseWindows(b.group_windows).length === 0) throw badRequest('WINDOWS_INVALID', 'Use the form 06:30-07:45, 20:00-21:15');
   const cfg = await getBotCfg();
   if (b.token) cfg.token = b.token;
-  if (b.enabled && (!cfg.token || !b.pt_group || !b.branch_id)) throw badRequest('BOT_INCOMPLETE', 'Token, PT group and branch are required to turn the bot on');
-  Object.assign(cfg, { enabled: b.enabled, botName: b.bot_name, ptGroup: b.pt_group, branchId: b.branch_id, groupTrainer: b.group_trainer, groupWindows: b.group_windows });
+  Object.assign(cfg, { enabled: b.enabled, botName: b.bot_name, ptGroup: b.pt_group, branchId: b.branch_id || cfg.branchId, groupTrainer: b.group_trainer, groupWindows: b.group_windows });
+  if (!cfg.branchId) {
+    const rows = await prisma.userRole.findMany({ where: { role: { key: 'trainer' }, branchId: { not: null }, user: { status: 'active' } }, select: { branchId: true }, distinct: ['branchId'] });
+    if (rows.length === 1 && rows[0].branchId && branchAllowed(req.access!, rows[0].branchId)) cfg.branchId = rows[0].branchId;
+  }
+  if (b.enabled && (!cfg.token || !cfg.ptGroup || !cfg.branchId)) throw badRequest('BOT_INCOMPLETE', 'Token, PT group and branch are required to turn the bot on');
   if (b.clean_group !== undefined) cfg.cleanGroup = b.clean_group;
   if (b.clean_on !== undefined) {
     if (b.clean_on && (!cfg.token || !cfg.cleanGroup)) throw badRequest('CLEAN_INCOMPLETE', 'Token and cleaning group are required to turn the cleaning bot on');

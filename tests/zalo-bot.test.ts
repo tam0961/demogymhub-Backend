@@ -60,14 +60,15 @@ describe('parseOffMessage', () => {
 });
 
 describe('zalo bot in the PT group', () => {
-  it('rejects turning on without a branch, then stores secrets masked', async () => {
+  it('keeps the saved branch when the form sends none, then stores secrets masked', async () => {
     const bad = await request(app)
       .put('/api/zalo/bot/config')
       .set({ Authorization: `Bearer ${ownerToken}` })
-      .send({ enabled: true, bot_name: 'x', pt_group: 'g', branch_id: '', group_trainer: '', group_windows: '' });
-    expect(bad.status).toBe(400);
+      .send({ enabled: true, bot_name: 'Bot AI TH Gym', pt_group: group, branch_id: '', group_trainer: 'Thinh', group_windows: '06:30-07:45, 20:00-21:15' });
+    expect(bad.status).toBe(200);
     const get = await request(app).get('/api/zalo/bot/config').set({ Authorization: `Bearer ${ownerToken}` });
     expect(get.body.data.has_token).toBe(true);
+    expect(get.body.data.branch_id).toBe(A);
   });
 
   it('writes shifts from a group message, skips class windows for the group PT, and replies', async () => {
