@@ -58,7 +58,7 @@ describe('payroll pt-stats', () => {
   });
 
   it('lists only PT positions with clients, taught sessions, classes and sales matching payroll', async () => {
-    const r = await stats();
+    const r = await stats(owner, { branch_id: BR });
     expect(r.status).toBe(200);
     const rows = r.body.data.rows as { user_id: string; clients: Record<string, unknown>[]; sessions_taught: number; group_classes: number; classes: unknown[]; member_sales: number; pt_sales: number; sales: Record<string, unknown>[] }[];
     expect(rows.map((x) => x.user_id).sort()).toEqual([ids.ptFull, ids.ptPart].sort());
