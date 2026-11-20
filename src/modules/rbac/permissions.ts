@@ -20,6 +20,7 @@ export const PERMISSIONS: string[] = [
   ...expand('attendance', ['read', 'manage']),
   ...expand('devices', ['manage']),
   ...expand('payroll', ['read', 'manage']),
+  ...expand('staff', ['read', 'manage']),
   'me.read',
 ];
 
@@ -78,6 +79,8 @@ export const ROLES: RoleDef[] = [
       'devices.manage',
       'payroll.read',
       'payroll.manage',
+      'staff.read',
+      'staff.manage',
       'me.read',
     ],
   },
@@ -93,6 +96,7 @@ export const ROLES: RoleDef[] = [
       'reports.view',
       'attendance.read',
       'devices.manage',
+      'staff.read',
       'me.read',
     ],
   },

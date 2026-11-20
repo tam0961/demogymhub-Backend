@@ -100,6 +100,7 @@ model User {
   employeeNo      String?        @unique @map("employee_no")
   punches         StaffPunch[]
   payrollProfile  PayrollProfile?
+  staffProfile    StaffProfile?
   payrollAdjustments PayrollAdjustment[]
 
   @@map("users")
@@ -742,4 +743,20 @@ model PayrollPeriod {
   closedAt DateTime? @map("closed_at") @db.Timestamptz
 
   @@map("payroll_periods")
+}
+
+model StaffProfile {
+  userId    String    @id @map("user_id") @db.Uuid
+  phone     String?
+  position  String    @default("other")
+  hiredOn   DateTime? @map("hired_on") @db.Date
+  leftOn    DateTime? @map("left_on") @db.Date
+  note      String?
+  active    Boolean   @default(true)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("staff_profiles")
 }

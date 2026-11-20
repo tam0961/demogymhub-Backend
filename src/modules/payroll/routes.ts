@@ -59,7 +59,7 @@ payrollRouter.put('/settings', authorize('payroll.manage'), async (req, res) => 
 
 payrollRouter.get('/profiles', authorize('payroll.read'), async (_req, res) => {
   const users = await prisma.user.findMany({
-    where: { status: 'active', userRoles: { some: { role: { key: { not: 'member' } } } } },
+    where: { status: 'active', OR: [{ staffProfile: null }, { staffProfile: { active: true } }], userRoles: { some: { role: { key: { not: 'member' } } } } },
     select: {
       id: true,
       name: true,

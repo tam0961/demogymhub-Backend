@@ -33,14 +33,14 @@ interface PayLike {
 }
 
 /** Thực thu of one payment inside [from, to): confirmed money in, refunded money out (refunds and negative payments reduce it). */
-function contribution(p: PayLike, from: Date, to: Date): number {
+export function contribution(p: PayLike, from: Date, to: Date): number {
   let v = 0;
   if ((p.status === 'confirmed' || p.status === 'refunded') && p.confirmedAt && p.confirmedAt >= from && p.confirmedAt < to) v += p.amount;
   if (p.status === 'refunded' && p.refundedAt && p.refundedAt >= from && p.refundedAt < to) v -= p.amount;
   return v;
 }
 
-const inRangeWhere = (from: Date, to: Date): Prisma.PaymentWhereInput => ({
+export const inRangeWhere = (from: Date, to: Date): Prisma.PaymentWhereInput => ({
   OR: [
     { status: { in: ['confirmed', 'refunded'] }, confirmedAt: { gte: from, lt: to } },
     { status: 'refunded', refundedAt: { gte: from, lt: to } },
@@ -94,7 +94,7 @@ export async function computePreview(month: string, branchId?: string): Promise<
   const settings = await getPayrollSettings();
   const { from, to } = monthRange(month);
 
-  const all = await prisma.payrollProfile.findMany({ where: { active: true, user: { status: 'active' } }, include: { user: { select: { id: true, name: true, userRoles: { select: { branchId: true } } } } } });
+  const all = await prisma.payrollProfile.findMany({ where: { active: true, user: { status: 'active', OR: [{ staffProfile: null }, { staffProfile: { active: true } }] } }, include: { user: { select: { id: true, name: true, userRoles: { select: { branchId: true } } } } } });
   const marketingIds = new Set(all.filter((p) => p.position === 'marketing').map((p) => p.userId));
   const staff = branchId ? all.filter((p) => p.user.userRoles.some((r) => r.branchId === null || r.branchId === branchId)) : all;
 

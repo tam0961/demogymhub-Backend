@@ -101,6 +101,7 @@ async function staffList(roles: string[], branchIds: string[] | null) {
   return prisma.user.findMany({
     where: {
       status: 'active',
+      OR: [{ staffProfile: null }, { staffProfile: { active: true } }],
       userRoles: { some: { role: { key: { in: roles } }, ...(branchIds ? { OR: [{ branchId: { in: branchIds } }, { branchId: null }] } : {}) } },
     },
     select: { id: true, name: true },

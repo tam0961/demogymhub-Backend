@@ -28,6 +28,7 @@ import { marketingRouter, sheetsRouter } from './modules/marketing/routes';
 import { printRouter } from './modules/printing/routes';
 import { attendancePublicRouter, attendanceRouter } from './modules/attendance/routes';
 import { payrollRouter } from './modules/payroll/routes';
+import { staffRouter } from './modules/staff/routes';
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -102,6 +103,7 @@ export function createApp() {
   app.use('/api/settings/print-templates', printRouter);
   app.use('/api/attendance', attendanceRouter);
   app.use('/api/payroll', payrollRouter);
+  app.use('/api/staff', staffRouter);
   app.use('/api', adminRouter);
 
   app.use(notFoundHandler);
