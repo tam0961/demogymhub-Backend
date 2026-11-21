@@ -85,9 +85,9 @@ export async function reportPdf(d: ReportData): Promise<Buffer> {
   d.sales.forEach((s, i) => row([{ v: `${i + 1}. ${s.name}`, x: M }, { v: vnd(s.revenue), x: W - M, r: true }]));
 
   heading('Chỉ số quan trọng của PT: buổi dạy');
-  row([{ v: 'PT', x: M }, { v: 'Tuần 1', x: 250, r: true }, { v: 'T2', x: 290, r: true }, { v: 'T3', x: 330, r: true }, { v: 'T4', x: 370, r: true }, { v: 'T5', x: 410, r: true }, { v: 'Tổng 1:1', x: 470, r: true }, { v: 'Nhóm', x: 510, r: true }, { v: 'TB/ngày', x: W - M, r: true }], true);
+  row([{ v: 'PT', x: M }, { v: 'Tuần 1', x: 235, r: true }, { v: 'T2', x: 273, r: true }, { v: 'T3', x: 311, r: true }, { v: 'T4', x: 349, r: true }, { v: 'T5', x: 387, r: true }, { v: 'Tổng 1:1', x: 450, r: true }, { v: 'Nhóm', x: 492, r: true }, { v: 'TB/ngày', x: W - M, r: true }], true);
   if (!d.ptKpi.length) row([{ v: 'Chưa có buổi dạy được ghi nhận', x: M }]);
-  for (const p of d.ptKpi) row([{ v: p.name, x: M }, ...p.weeks.map((w, k) => ({ v: num(w), x: 250 + k * 40, r: true })), { v: num(p.sessions), x: 470, r: true, b: true }, { v: num(p.classes), x: 510, r: true }, { v: String(p.perDay).replace('.', ','), x: W - M, r: true }]);
+  for (const p of d.ptKpi) row([{ v: p.name, x: M }, ...p.weeks.map((w, k) => ({ v: num(w), x: 235 + k * 38, r: true })), { v: num(p.sessions), x: 450, r: true, b: true }, { v: num(p.classes), x: 492, r: true }, { v: String(p.perDay).replace('.', ','), x: W - M, r: true }]);
 
   const pct = (a: number, b: number) => (b > 0 ? `${Math.round((a / b) * 100)}%` : '-');
   heading('Chỉ số quan trọng của PT: chất lượng');
@@ -103,7 +103,9 @@ export async function reportPdf(d: ReportData): Promise<Buffer> {
       { v: `${p.renewed}/${p.customers} (${pct(p.renewed, p.customers)})`, x: W - M, r: true },
     ]);
   }
-  text('Hoàn thành = buổi hoàn thành / tổng book hẹn. Hủy = hủy hoặc không đến / tổng book hẹn. Chuyển đổi = hợp đồng PT và nhóm / lead đã chia.', M, 8, font, MUTED);
+  text('Hoàn thành = buổi hoàn thành / tổng book hẹn. Hủy = hủy hoặc không đến / tổng book hẹn.', M, 8, font, MUTED);
+  y -= 11;
+  text('Chuyển đổi = hợp đồng PT và nhóm / lead đã chia.', M, 8, font, MUTED);
   y -= 11;
   text('Off track = khách PT quá 14 ngày không đi tập / tổng khách PT. Renew = hợp đồng renew / tổng khách PT.', M, 8, font, MUTED);
   y -= 14;
