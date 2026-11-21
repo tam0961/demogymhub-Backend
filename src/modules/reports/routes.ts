@@ -313,7 +313,7 @@ const businessQ = z.object({
 });
 
 type Kind = 'member' | 'pt' | 'group';
-const kindOf = (p: { category: string; displayGroup: string | null }): Kind => (p.displayGroup === 'pt_group' || p.category === 'pt_group' ? 'group' : p.category === 'member' ? 'member' : 'pt');
+const kindOf = (p: { category: string; displayGroup: string | null }): Kind | null => (p.displayGroup === 'pt_group' || p.category === 'pt_group' ? 'group' : p.category === 'member' ? 'member' : p.category === 'pt_1on1' || p.category === 'pt_1on2' ? 'pt' : null);
 const fmtDay = (d: Date) => d.toISOString().slice(0, 10);
 
 reportsRouter.get('/business', authorize('reports.view'), async (req, res) => {
@@ -339,10 +339,19 @@ reportsRouter.get('/business', authorize('reports.view'), async (req, res) => {
     prisma.payment.findMany({ where: { ...bf, status: 'refunded', refundedAt: { gte: from, lt: to } }, select: { amount: true, refundedAt: true, contract: { select: { package: pkgSel } } } }),
   ]);
   const revenue = empty();
-  for (const c of created) revenue[bucketOf(c.createdAt)][kindOf(c.package)] += c.totalAmount;
+  for (const c of created) {
+    const k = kindOf(c.package);
+    if (k) revenue[bucketOf(c.createdAt)][k] += c.totalAmount;
+  }
   const collected = empty();
-  for (const x of paid) collected[bucketOf(x.confirmedAt!)][x.contract ? kindOf(x.contract.package) : 'member'] += x.amount;
-  for (const x of refunded) collected[bucketOf(x.refundedAt!)][x.contract ? kindOf(x.contract.package) : 'member'] -= x.amount;
+  for (const x of paid) {
+    const k = x.contract ? kindOf(x.contract.package) : 'member';
+    if (k) collected[bucketOf(x.confirmedAt!)][k] += x.amount;
+  }
+  for (const x of refunded) {
+    const k = x.contract ? kindOf(x.contract.package) : 'member';
+    if (k) collected[bucketOf(x.refundedAt!)][k] -= x.amount;
+  }
   const sum = (rows: typeof revenue) => rows.reduce((s, r) => s + r.member + r.pt + r.group, 0);
 
   const d7 = addDays(today, 7);
