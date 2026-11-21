@@ -30,7 +30,6 @@ export interface PtKpi {
   renewed: number;
 }
 
-const PT_CATS = ['pt_1on1', 'pt_1on2', 'pt_group'] as const;
 const OFF_TRACK_DAYS = 14;
 const weekOf = (d: Date) => Math.min(4, Math.floor((new Date(d.getTime() + 7 * 3600_000).getUTCDate() - 1) / 7));
 
@@ -91,7 +90,7 @@ export async function buildReport(month: string): Promise<ReportData> {
     prisma.ptSession.findMany({ where: { OR: [{ startAt: range }, { status: 'completed', completedAt: range }] }, select: { trainerId: true, status: true, startAt: true, completedAt: true } }),
     prisma.lead.groupBy({ by: ['assignedTo'], where: { assignedTo: { not: null }, createdAt: range }, _count: { _all: true } }),
     prisma.contract.findMany({ where: { createdAt: range, status: { not: 'cancelled' }, ptUserId: { not: null } }, select: { ptUserId: true, renewedFromId: true, package: { select: { category: true } } } }),
-    prisma.contract.findMany({ where: { status: 'active', ptUserId: { not: null }, package: { category: { in: [...PT_CATS] } } }, select: { ptUserId: true, memberId: true } }),
+    prisma.contract.findMany({ where: { status: 'active', ptUserId: { not: null }, package: { category: 'pt_1on1' } }, select: { ptUserId: true, memberId: true } }),
   ]);
   const lastIn = customerRows.length
     ? await prisma.checkin.groupBy({ by: ['memberId'], where: { memberId: { in: [...new Set(customerRows.map((c) => c.memberId))] }, result: 'allowed' }, _max: { checkedInAt: true } })
@@ -125,7 +124,7 @@ export async function buildReport(month: string): Promise<ReportData> {
       contractsGroup: cs.filter((c) => c.package.category === 'pt_group').length,
       customers: members.length,
       offTrack: members.filter((m) => { const t = lastAt.get(m); return !t || t.getTime() < cutoff; }).length,
-      renewed: cs.filter((c) => c.renewedFromId).length,
+      renewed: cs.filter((c) => c.renewedFromId && c.package.category === 'pt_1on1').length,
     };
   }).sort((a, b) => b.sessions + b.classes - (a.sessions + a.classes));
   const owed = debt.map((c) => c.totalAmount - c.paidAmount).filter((x) => x > 0);

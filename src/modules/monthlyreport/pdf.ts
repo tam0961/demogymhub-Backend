@@ -84,31 +84,80 @@ export async function reportPdf(d: ReportData): Promise<Buffer> {
   if (!d.sales.length) row([{ v: 'Chưa có hợp đồng gắn Sale', x: M }]);
   d.sales.forEach((s, i) => row([{ v: `${i + 1}. ${s.name}`, x: M }, { v: vnd(s.revenue), x: W - M, r: true }]));
 
-  heading('Chỉ số quan trọng của PT: buổi dạy');
-  row([{ v: 'PT', x: M }, { v: 'Tuần 1', x: 235, r: true }, { v: 'T2', x: 273, r: true }, { v: 'T3', x: 311, r: true }, { v: 'T4', x: 349, r: true }, { v: 'T5', x: 387, r: true }, { v: 'Tổng 1:1', x: 450, r: true }, { v: 'Nhóm', x: 492, r: true }, { v: 'TB/ngày', x: W - M, r: true }], true);
-  if (!d.ptKpi.length) row([{ v: 'Chưa có buổi dạy được ghi nhận', x: M }]);
-  for (const p of d.ptKpi) row([{ v: p.name, x: M }, ...p.weeks.map((w, k) => ({ v: num(w), x: 235 + k * 38, r: true })), { v: num(p.sessions), x: 450, r: true, b: true }, { v: num(p.classes), x: 492, r: true }, { v: String(p.perDay).replace('.', ','), x: W - M, r: true }]);
+  const at = (s: string, x: number, yy: number, size = 8, f = font, color = INK) => page.drawText(s.normalize('NFC'), { x, y: yy, size, font: f, color });
+  const atRight = (s: string, xr: number, yy: number, size = 8, f = font, color = INK) => at(s, xr - f.widthOfTextAtSize(s.normalize('NFC'), size), yy, size, f, color);
+  const COLORS = [rgb(0.96, 0.72, 0), rgb(0.15, 0.15, 0.15), rgb(0.1, 0.6, 0.55), rgb(0.2, 0.45, 0.85), rgb(0.6, 0.35, 0.8), rgb(0.85, 0.35, 0.3)];
+  const pts = d.ptKpi;
+  const pct = (a: number, b: number) => (b > 0 ? Math.round((a / b) * 100) : 0);
+  const lbl = (a: number, b: number) => (b > 0 ? `${pct(a, b)}% (${a}/${b})` : '-');
 
-  const pct = (a: number, b: number) => (b > 0 ? `${Math.round((a / b) * 100)}%` : '-');
-  heading('Chỉ số quan trọng của PT: chất lượng');
-  row([{ v: 'PT', x: M }, { v: 'Hoàn thành', x: 215, r: true }, { v: 'Hủy/không đến', x: 305, r: true }, { v: 'Chuyển đổi', x: 385, r: true }, { v: 'Off track', x: 470, r: true }, { v: 'Renew', x: W - M, r: true }], true);
-  if (!d.ptKpi.length) row([{ v: 'Chưa có dữ liệu', x: M }]);
-  for (const p of d.ptKpi) {
-    row([
-      { v: p.name, x: M },
-      { v: `${pct(p.completed, p.booked)} (${p.completed}/${p.booked})`, x: 215, r: true },
-      { v: `${pct(p.cancelled, p.booked)} (${p.cancelled}/${p.booked})`, x: 305, r: true },
-      { v: `${pct(p.contractsPt + p.contractsGroup, p.leads)} (${p.contractsPt + p.contractsGroup}/${p.leads})`, x: 385, r: true },
-      { v: `${p.offTrack}/${p.customers} (${pct(p.offTrack, p.customers)})`, x: 470, r: true },
-      { v: `${p.renewed}/${p.customers} (${pct(p.renewed, p.customers)})`, x: W - M, r: true },
-    ]);
+  heading('Chỉ số quan trọng của PT 1:1: buổi dạy theo tuần');
+  if (!pts.length) row([{ v: 'Chưa có buổi dạy được ghi nhận', x: M }]);
+  else {
+    const CH = 110;
+    ensure(CH + 60);
+    let lx = M;
+    for (const [k, p] of pts.entries()) {
+      page.drawRectangle({ x: lx, y: y - 2, width: 8, height: 8, color: COLORS[k % COLORS.length] });
+      const t = `${p.name}: ${num(p.sessions)} buổi, TB ${String(p.perDay).replace('.', ',')}/ngày`;
+      at(t, lx + 12, y - 1, 8.5);
+      lx += 12 + font.widthOfTextAtSize(t.normalize('NFC'), 8.5) + 16;
+    }
+    y -= 16;
+    const base = y - CH;
+    const max = Math.max(1, ...pts.flatMap((p) => p.weeks));
+    const gw = (W - 2 * M) / 5;
+    const bw = Math.min(22, (gw - 16) / pts.length);
+    page.drawLine({ start: { x: M, y: base }, end: { x: W - M, y: base }, thickness: 0.8, color: MUTED });
+    for (let w = 0; w < 5; w++) {
+      const x0 = M + w * gw + (gw - bw * pts.length) / 2;
+      for (const [k, p] of pts.entries()) {
+        const h = (p.weeks[w] / max) * (CH - 14);
+        if (h > 0) page.drawRectangle({ x: x0 + k * bw, y: base, width: bw - 2, height: h, color: COLORS[k % COLORS.length] });
+        const v = num(p.weeks[w]);
+        at(v, x0 + k * bw + (bw - 2) / 2 - font.widthOfTextAtSize(v, 7.5) / 2, base + h + 3, 7.5);
+      }
+      const name = `Tuần ${w + 1}`;
+      at(name, M + w * gw + gw / 2 - font.widthOfTextAtSize(name, 8) / 2, base - 12, 8, font, MUTED);
+    }
+    y = base - 26;
   }
-  text('Hoàn thành = buổi hoàn thành / tổng book hẹn. Hủy = hủy hoặc không đến / tổng book hẹn.', M, 8, font, MUTED);
-  y -= 11;
-  text('Chuyển đổi = hợp đồng PT và nhóm / lead đã chia.', M, 8, font, MUTED);
-  y -= 11;
-  text('Off track = khách PT quá 14 ngày không đi tập / tổng khách PT. Renew = hợp đồng renew / tổng khách PT.', M, 8, font, MUTED);
-  y -= 14;
+
+  heading('Chỉ số quan trọng của PT 1:1: chất lượng');
+  const metrics: { title: string; sub: string; val: (p: (typeof pts)[number]) => [number, number] }[] = [
+    { title: 'Hoàn thành buổi', sub: 'buổi hoàn thành / tổng book hẹn', val: (p) => [p.completed, p.booked] },
+    { title: 'Hủy hoặc không đến', sub: 'buổi hủy, không đến / tổng book hẹn', val: (p) => [p.cancelled, p.booked] },
+    { title: 'Chuyển đổi PT 1:1', sub: 'hợp đồng PT 1:1 / lead đã chia', val: (p) => [p.contractsPt, p.leads] },
+    { title: 'Chuyển đổi nhóm', sub: 'hợp đồng nhóm / lead đã chia', val: (p) => [p.contractsGroup, p.leads] },
+    { title: 'Khách off track', sub: 'quá 14 ngày không đi tập / tổng khách PT 1:1', val: (p) => [p.offTrack, p.customers] },
+    { title: 'Tỉ lệ renew', sub: 'hợp đồng renew / tổng khách PT 1:1', val: (p) => [p.renewed, p.customers] },
+  ];
+  if (!pts.length) row([{ v: 'Chưa có dữ liệu', x: M }]);
+  const PW = 245;
+  const panel = (x: number, top: number, m: (typeof metrics)[number]) => {
+    at(m.title, x, top - 10, 10, bold);
+    at(m.sub, x, top - 22, 7.5, font, MUTED);
+    let yy = top - 38;
+    for (const [k, p] of pts.entries()) {
+      const [a, b] = m.val(p);
+      at(p.name.length > 14 ? `${p.name.slice(0, 13)}.` : p.name, x, yy, 8);
+      const tx = x + 78;
+      const tw = PW - 78 - 70;
+      page.drawRectangle({ x: tx, y: yy - 2, width: tw, height: 9, color: rgb(0.93, 0.93, 0.93) });
+      const w = (Math.min(100, pct(a, b)) / 100) * tw;
+      if (w > 0) page.drawRectangle({ x: tx, y: yy - 2, width: w, height: 9, color: COLORS[k % COLORS.length] });
+      atRight(lbl(a, b), x + PW, yy, 8, bold);
+      yy -= 16;
+    }
+    return top - yy + 4;
+  };
+  for (let i = 0; i < metrics.length; i += 2) {
+    const h = 38 + pts.length * 16 + 8;
+    ensure(h);
+    const top = y;
+    const used = Math.max(panel(M, top, metrics[i]), metrics[i + 1] ? panel(M + PW + 17, top, metrics[i + 1]) : 0);
+    y = top - used - 6;
+  }
 
   ensure(30);
   y -= 6;
