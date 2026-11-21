@@ -75,6 +75,28 @@ describe('cleaning bot', () => {
     await runCleanReminders(cfgOn(), deps, at('2031-03-20', 12, 1));
     expect(sent).toHaveLength(1);
     expect(sent[0]).toContain('NHẮC VỆ SINH ĐỊNH KỲ');
+    await runCleanReminders(cfgOn(), deps, at('2031-03-20', 14, 1));
+    expect(sent).toHaveLength(1);
+    await runCleanReminders(cfgOn(), deps, at('2031-03-20', 15, 1));
+    await runCleanReminders(cfgOn(), deps, at('2031-03-20', 18, 31));
+    expect(sent).toHaveLength(3);
+  });
+
+  it('asks again after 30 minutes when a periodic slot is unconfirmed, and stays silent once confirmed', async () => {
+    sent.length = 0;
+    const d = '2031-05-06';
+    await runCleanReminders(cfgOn(), deps, at(d, 12, 1));
+    await runCleanReminders(cfgOn(), deps, at(d, 12, 31));
+    await runCleanReminders(cfgOn(), deps, at(d, 12, 35));
+    expect(sent).toHaveLength(2);
+    expect(sent[1]).toContain('Vệ sinh định kỳ 12:00');
+    expect(sent[1]).toContain('12:30');
+
+    await runCleanReminders(cfgOn(), deps, at(d, 15, 2));
+    await handleCleanText(cfgOn(), deps, 'xong', 'Khanh', at(d, 15, 10));
+    expect(sent[3]).toBe('✅ Khanh đã xác nhận xong Vệ sinh định kỳ 15:00 lúc 15:10');
+    await runCleanReminders(cfgOn(), deps, at(d, 15, 32));
+    expect(sent).toHaveLength(4);
   });
 
   it('uses edited templates saved through the config route and falls back for blank ones', async () => {
@@ -89,7 +111,7 @@ describe('cleaning bot', () => {
     const cfg = await getBotCfg();
     expect(cleanTemplates(cfg).hourly).toBe('Nhắc nhanh {date}');
     sent.length = 0;
-    await runCleanReminders({ ...cfg, enabled: true }, deps, at('2031-04-02', 14, 3));
+    await runCleanReminders({ ...cfg, enabled: true }, deps, at('2031-04-02', 15, 3));
     expect(sent).toEqual(['Nhắc nhanh 02/04']);
   });
 

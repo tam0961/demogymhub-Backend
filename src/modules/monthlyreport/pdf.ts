@@ -84,10 +84,29 @@ export async function reportPdf(d: ReportData): Promise<Buffer> {
   if (!d.sales.length) row([{ v: 'Chưa có hợp đồng gắn Sale', x: M }]);
   d.sales.forEach((s, i) => row([{ v: `${i + 1}. ${s.name}`, x: M }, { v: vnd(s.revenue), x: W - M, r: true }]));
 
-  heading('PT: buổi dạy trong tháng');
-  row([{ v: 'PT', x: M }, { v: 'Buổi 1:1', x: 400, r: true }, { v: 'Lớp nhóm', x: W - M, r: true }], true);
-  if (!d.pts.length) row([{ v: 'Chưa có buổi dạy được ghi nhận', x: M }]);
-  for (const p of d.pts) row([{ v: p.name, x: M }, { v: num(p.sessions), x: 400, r: true }, { v: num(p.classes), x: W - M, r: true }]);
+  heading('Chỉ số quan trọng của PT: buổi dạy');
+  row([{ v: 'PT', x: M }, { v: 'Tuần 1', x: 250, r: true }, { v: 'T2', x: 290, r: true }, { v: 'T3', x: 330, r: true }, { v: 'T4', x: 370, r: true }, { v: 'T5', x: 410, r: true }, { v: 'Tổng 1:1', x: 470, r: true }, { v: 'Nhóm', x: 510, r: true }, { v: 'TB/ngày', x: W - M, r: true }], true);
+  if (!d.ptKpi.length) row([{ v: 'Chưa có buổi dạy được ghi nhận', x: M }]);
+  for (const p of d.ptKpi) row([{ v: p.name, x: M }, ...p.weeks.map((w, k) => ({ v: num(w), x: 250 + k * 40, r: true })), { v: num(p.sessions), x: 470, r: true, b: true }, { v: num(p.classes), x: 510, r: true }, { v: String(p.perDay).replace('.', ','), x: W - M, r: true }]);
+
+  const pct = (a: number, b: number) => (b > 0 ? `${Math.round((a / b) * 100)}%` : '-');
+  heading('Chỉ số quan trọng của PT: chất lượng');
+  row([{ v: 'PT', x: M }, { v: 'Hoàn thành', x: 215, r: true }, { v: 'Hủy/không đến', x: 305, r: true }, { v: 'Chuyển đổi', x: 385, r: true }, { v: 'Off track', x: 470, r: true }, { v: 'Renew', x: W - M, r: true }], true);
+  if (!d.ptKpi.length) row([{ v: 'Chưa có dữ liệu', x: M }]);
+  for (const p of d.ptKpi) {
+    row([
+      { v: p.name, x: M },
+      { v: `${pct(p.completed, p.booked)} (${p.completed}/${p.booked})`, x: 215, r: true },
+      { v: `${pct(p.cancelled, p.booked)} (${p.cancelled}/${p.booked})`, x: 305, r: true },
+      { v: `${pct(p.contractsPt + p.contractsGroup, p.leads)} (${p.contractsPt + p.contractsGroup}/${p.leads})`, x: 385, r: true },
+      { v: `${p.offTrack}/${p.customers} (${pct(p.offTrack, p.customers)})`, x: 470, r: true },
+      { v: `${p.renewed}/${p.customers} (${pct(p.renewed, p.customers)})`, x: W - M, r: true },
+    ]);
+  }
+  text('Hoàn thành = buổi hoàn thành / tổng book hẹn. Hủy = hủy hoặc không đến / tổng book hẹn. Chuyển đổi = hợp đồng PT và nhóm / lead đã chia.', M, 8, font, MUTED);
+  y -= 11;
+  text('Off track = khách PT quá 14 ngày không đi tập / tổng khách PT. Renew = hợp đồng renew / tổng khách PT.', M, 8, font, MUTED);
+  y -= 14;
 
   ensure(30);
   y -= 6;

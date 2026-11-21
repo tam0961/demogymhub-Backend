@@ -46,7 +46,7 @@ export const CLEAN_TPL_DEFAULT: Record<CleanTplKey, string> = {
   morning: lines(head('CA SÁNG'), numbered(MORNING), '', HOW),
   afternoon: lines(head('CA CHIỀU'), numbered(AFTERNOON), '', HOW),
   leaf: lines('🌿 VIỆC ĐỊNH KỲ NGÀY {date}', 'Lau lá cây: chụp hình đã vệ sinh gửi lên nhóm Vệ Sinh. Mỗi bạn PT 1 cây'),
-  hourly: lines('🧹 NHẮC VỆ SINH ĐỊNH KỲ', '1/ Kiểm tra vệ sinh toilet nam, nữ (đặc biệt: tóc, nước)', '2/ Dẹp tạ gọn gàng'),
+  hourly: lines('🧹 NHẮC VỆ SINH ĐỊNH KỲ', '1/ Kiểm tra vệ sinh toilet nam, nữ (đặc biệt: tóc, nước)', '2/ Dẹp tạ gọn gàng', '', HOW),
   done: '✅ {name} đã xác nhận xong {ca} lúc {time}',
   late: '⚠️ {ca} đã quá hạn xác nhận ({deadline}) mà chưa ai nhắn "xong". Anh Chị làm xong nhắn "xong" giúp em, nhớ tag "{bot}" ạ.',
 };

@@ -9,13 +9,16 @@ const CA: Record<Ca, { name: string; at: number; tpl: 'morning' | 'afternoon' }>
   chieu: { name: 'Ca Chiều', at: 16 * 60 + 45, tpl: 'afternoon' },
 };
 const WINDOW = 75;
-const HOURLY = [8, 12, 14, 18, 20];
+const HOURLY = [12 * 60, 15 * 60, 18 * 60 + 30];
+const REPEAT = 30;
 const STATE_KEY = 'zalobot_clean';
 
 interface CleanState {
   date: string;
-  last: Ca | '';
+  last: string;
   sent: Ca[];
+  hsent: string[];
+  h: Record<string, { by: string; at: string }>;
   sang: { by: string; at: string } | null;
   chieu: { by: string; at: string } | null;
 }
@@ -42,7 +45,7 @@ const fold = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/
 async function getState(date: string): Promise<CleanState> {
   const row = await prisma.setting.findUnique({ where: { key: STATE_KEY } });
   const s = (row?.value ?? {}) as Partial<CleanState>;
-  return s.date === date ? ({ last: '', sent: [], sang: null, chieu: null, ...s } as CleanState) : { date, last: '', sent: [], sang: null, chieu: null };
+  return s.date === date ? ({ last: '', sent: [], hsent: [], h: {}, sang: null, chieu: null, ...s } as CleanState) : { date, last: '', sent: [], hsent: [], h: {}, sang: null, chieu: null };
 }
 
 async function setState(s: CleanState) {
@@ -50,17 +53,29 @@ async function setState(s: CleanState) {
   await prisma.setting.upsert({ where: { key: STATE_KEY }, create: { key: STATE_KEY, value }, update: { value } });
 }
 
+const hourlyLabel = (m: number) => `Vệ sinh định kỳ ${hhmm(m)}`;
+
 const vars = (cfg: BotCfg, extra: Record<string, string> = {}) => ({ bot: cfg.botName, ...extra });
 
 /** A "xong" message in the cleaning group confirms the latest checklist sent today. */
 export async function handleCleanText(cfg: BotCfg, deps: CleanDeps, text: string, by: string, now: { date: string; h: number; mi: number }) {
   if (!/\b(xong|da xong|hoan thanh|done)\b/.test(fold(text))) return;
   const st = await getState(now.date);
-  if (!st.last || st[st.last]) return;
+  if (!st.last) return;
   const time = `${pad(now.h)}:${pad(now.mi)}`;
-  st[st.last] = { by, at: time };
+  let label: string;
+  if (st.last.startsWith('h')) {
+    if (st.h[st.last]) return;
+    st.h[st.last] = { by, at: time };
+    label = hourlyLabel(Number(st.last.slice(1)));
+  } else {
+    const ca = st.last as Ca;
+    if (st[ca]) return;
+    st[ca] = { by, at: time };
+    label = CA[ca].name;
+  }
   await setState(st);
-  await deps.say(renderTpl(cleanTemplates(cfg).done, vars(cfg, { name: by, ca: CA[st.last].name, time })));
+  await deps.say(renderTpl(cleanTemplates(cfg).done, vars(cfg, { name: by, ca: label, time })));
 }
 
 /** Runs every minute; each slot is sent once (bot_sent) within 10 minutes after its time. */
@@ -88,6 +103,19 @@ export async function runCleanReminders(cfg: BotCfg, deps: CleanDeps, now: { dat
     }
   }
   for (const h of HOURLY) {
-    if (inWin(h * 60) && (await deps.once(`cleanh:${now.date}:${h}`))) await deps.say(renderTpl(tpl.hourly, vars(cfg, { date: dm })));
+    const key = `h${h}`;
+    if (inWin(h) && (await deps.once(`cleanh:${now.date}:${h}`))) {
+      const st = await getState(now.date);
+      st.last = key;
+      st.hsent = [...st.hsent, key];
+      await setState(st);
+      await deps.say(renderTpl(tpl.hourly, vars(cfg, { date: dm })));
+    }
+    if (inWin(h + REPEAT)) {
+      const st = await getState(now.date);
+      if (st.hsent.includes(key) && !st.h[key] && (await deps.once(`cleanhlate:${now.date}:${h}`))) {
+        await deps.say(renderTpl(tpl.late, vars(cfg, { ca: hourlyLabel(h), deadline: hhmm(h + REPEAT), date: dm })));
+      }
+    }
   }
 }
