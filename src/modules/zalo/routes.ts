@@ -11,7 +11,7 @@ import { appsScriptCode, driveReady, ensureSecret, getReportCfg, publicReportCfg
 import { previousMonthVN } from '../monthlyreport/data';
 import { createReportPdf, publishReport } from '../monthlyreport/service';
 import { branchAllowed } from '../rbac/service';
-import { getZns, publicZns, saveZns, sendZns, sendExpiryReminders, SAMPLE_VARS, ZNS_EVENTS } from './service';
+import { getZns, publicZns, saveZns, sendZns, sendExpiryReminders, sendPaymentReminders, SAMPLE_VARS, ZNS_EVENTS } from './service';
 
 export const zaloRouter = Router();
 zaloRouter.use(authenticate, authorize('system.manage_settings'));
@@ -19,7 +19,7 @@ zaloRouter.use(authenticate, authorize('system.manage_settings'));
 const eventSchema = z.object({
   enabled: z.boolean(),
   template_id: z.string().trim().max(100),
-  days: z.array(z.number().int().min(1).max(90)).max(6).default([]),
+  days: z.array(z.number().int().min(0).max(90)).max(6).default([]),
   params: z.record(z.string().trim().max(60), z.string().trim().max(40)).default({}),
 });
 const configSchema = z.object({
@@ -66,7 +66,9 @@ zaloRouter.post('/test', async (req, res) => {
 });
 
 zaloRouter.post('/run-reminders', async (_req, res) => {
-  res.json({ data: await sendExpiryReminders() });
+  const a = await sendExpiryReminders();
+  const b = await sendPaymentReminders();
+  res.json({ data: { sent: a.sent + b.sent } });
 });
 
 zaloRouter.get('/logs', async (_req, res) => {

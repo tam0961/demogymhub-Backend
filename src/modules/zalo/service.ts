@@ -3,7 +3,7 @@ import { addDays, dateOnly, todayVN } from '../../lib/dates';
 import { logger } from '../../lib/logger';
 import { prisma } from '../../lib/prisma';
 
-export const ZNS_EVENTS = ['new_contract', 'renewal', 'expiring', 'pt_signed'] as const;
+export const ZNS_EVENTS = ['new_contract', 'payment_due', 'expiring', 'pt_signed'] as const;
 export type ZnsEvent = (typeof ZNS_EVENTS)[number];
 
 export interface EventCfg {
@@ -31,7 +31,7 @@ const fresh = (): ZnsCfg => ({
   accessToken: '',
   refreshToken: '',
   testPhone: '',
-  events: { new_contract: blank(), renewal: blank(), expiring: blank([30, 14, 7]), pt_signed: blank() },
+  events: { new_contract: blank(), payment_due: blank([3, 0]), expiring: blank([30, 14, 7]), pt_signed: blank() },
 });
 
 export async function getZns(): Promise<ZnsCfg> {
@@ -158,6 +158,8 @@ export const SAMPLE_VARS: Record<string, string> = {
   package_name: 'Goi 3 thang',
   end_date: '31/12/2026',
   days_left: '7',
+  amount_due: '5.000.000',
+  due_date: '31/12/2026',
   pt_name: 'PT Khanh',
   session_time: '18:00 19/11/2026',
   sessions_left: '12',
@@ -168,7 +170,7 @@ export async function notifyContract(contractId: string) {
   try {
     const c = await prisma.contract.findUnique({ where: { id: contractId }, include: { member: true, package: true } });
     if (!c || c.status !== 'active') return;
-    const event: ZnsEvent = c.renewedFromId ? 'renewal' : 'new_contract';
+    const event: ZnsEvent = 'new_contract';
     await sendZns({
       event,
       dedupeKey: `${event}:${c.id}`,
@@ -232,11 +234,39 @@ export async function sendExpiryReminders(now = new Date()) {
   return { sent };
 }
 
+const fmtMoney = (n: number) => String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+
+export async function sendPaymentReminders(now = new Date()) {
+  const cfg = await getZns();
+  const ev = cfg.events.payment_due;
+  if (!ev.enabled || !ev.templateId || !cfg.accessToken) return { sent: 0 };
+  const today = dateOnly(todayVN(now));
+  let sent = 0;
+  for (const d of ev.days) {
+    const due = addDays(today, d);
+    const list = await prisma.contract.findMany({ where: { status: { in: ['active', 'signed'] }, paymentDueDate: due }, include: { member: true, package: true } });
+    for (const c of list) {
+      const owed = c.totalAmount - c.paidAmount;
+      if (owed <= 0) continue;
+      const r = await sendZns({
+        event: 'payment_due',
+        dedupeKey: `payment_due:${c.id}:${d}`,
+        memberId: c.memberId,
+        phone: c.member.phone,
+        vars: { customer_name: c.member.name, contract_code: c.code, package_name: c.packageName ?? c.package.name, amount_due: fmtMoney(owed), due_date: fmtVN(c.paymentDueDate), days_left: String(d), gym_name: 'TH Gym' },
+      });
+      if (r.status === 'sent') sent++;
+    }
+  }
+  return { sent };
+}
+
 export function startZnsJob(everyMs = 3600_000) {
   const run = () => {
     const hour = new Date(Date.now() + 7 * 3600 * 1000).getUTCHours();
     if (hour < 9) return;
     sendExpiryReminders().catch((e) => logger.error({ err: e }, 'sendExpiryReminders failed'));
+    sendPaymentReminders().catch((e) => logger.error({ err: e }, 'sendPaymentReminders failed'));
   };
   const t = setInterval(run, everyMs);
   t.unref();
