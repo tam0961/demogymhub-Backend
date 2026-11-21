@@ -65,8 +65,16 @@ const weekStart = (iso: string) => addDays(iso, -((new Date(`${iso}T12:00:00Z`).
 export interface OffItem {
   name: string;
   days: number[];
+  kind: 'days' | 'none' | 'empty';
 }
-/** "LỊCH OFF" message: lines like "1/ Thịnh: off thứ 3". Sent on Sunday counts for the coming week. Days 2..7 = Mon..Sat, 8 = Sunday. */
+
+/** Messages sent on Saturday or Sunday are for the coming week, otherwise for the current one. */
+export function offWeekOf(sentAt: Date): string {
+  const p = vnParts(sentAt);
+  return weekStart(p.dow === 0 ? addDays(p.date, 1) : p.dow === 6 ? addDays(p.date, 2) : p.date);
+}
+
+/** "LỊCH OFF" message: lines like "1/ Thịnh: off thứ 3, 4". A name with nothing after the colon is not reported yet. Days 2..7 = Mon..Sat, 8 = Sunday. */
 export function parseOffMessage(text: string, sentAt: Date): { week: string; items: OffItem[] } | null {
   const lines = text.replace(MENTION, ' ').split(/\r?\n/);
   const fold = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toLowerCase();
@@ -81,16 +89,23 @@ export function parseOffMessage(text: string, sentAt: Date): { week: string; ite
     if (!name) return;
     const r = fold(m[2]);
     if (/\b(khong|k)\s*(off|nghi)\b/.test(r)) {
-      items.push({ name, days: [] });
+      items.push({ name, days: [], kind: 'none' });
       return;
     }
     const days = new Set<number>();
-    for (const x of r.matchAll(/(?:thu|t)\s*([2-7])/g)) days.add(Number(x[1]));
+    for (const x of r.matchAll(/(?:thu|t)\s*([2-7](?:\s*(?:,|;|-|va|&|\/)?\s*[2-7])*)(?![\d])/g)) for (const d of x[1].matchAll(/[2-7]/g)) days.add(Number(d[0]));
     if (/chu\s*nhat|\bcn\b/.test(r)) days.add(8);
-    items.push({ name, days: [...days].sort() });
+    items.push({ name, days: [...days].sort(), kind: days.size ? 'days' : 'empty' });
   });
   if (!items.length) return null;
-  return { week: weekStart(addDays(vnParts(sentAt).date, 1)), items };
+  return { week: offWeekOf(sentAt), items };
+}
+
+async function pendingOff(branchId: string, week: string) {
+  const trainers = await branchTrainers(branchId);
+  const done = await prisma.botSent.findMany({ where: { key: { startsWith: `offrep:${week}:` } }, select: { key: true } });
+  const have = new Set(done.map((d) => d.key.split(':')[2]));
+  return trainers.filter((t) => !have.has(t.id));
 }
 
 async function applyOff(cfg: BotCfg, text: string, sentAt: Date): Promise<string | null> {
@@ -99,6 +114,7 @@ async function applyOff(cfg: BotCfg, text: string, sentAt: Date): Promise<string
   const trainers = await branchTrainers(cfg.branchId);
   let done = 0;
   for (const it of off.items) {
+    if (it.kind === 'empty') continue;
     const found = trainers.filter((t) => lastWord(t.name) === lastWord(it.name));
     if (found.length !== 1) continue;
     const trainerId = found[0].id;
@@ -107,9 +123,13 @@ async function applyOff(cfg: BotCfg, text: string, sentAt: Date): Promise<string
       const key = { trainerId, branchId: cfg.branchId, date: dateOnly(addDays(off.week, n - 2)) };
       await prisma.ptDayOff.upsert({ where: { trainerId_branchId_date: key }, create: key, update: {} });
     }
+    await once(`offrep:${off.week}:${trainerId}`);
     done++;
   }
-  return done ? `✅ Đã ghi nhận lịch OFF tuần ${fmtDM(off.week)} đến ${fmtDM(addDays(off.week, 6))}` : null;
+  if (!done) return null;
+  const miss = await pendingOff(cfg.branchId, off.week);
+  const head = `✅ Đã ghi nhận lịch OFF tuần ${fmtDM(off.week)} đến ${fmtDM(addDays(off.week, 6))}`;
+  return miss.length ? `${head}${String.fromCharCode(10)}⏳ Còn thiếu lịch OFF: ${miss.map((p) => tagOf(p.name)).join(' ')}` : head;
 }
 
 export async function handleGroupText(cfg: BotCfg, text: string, sentAt: Date): Promise<string | null> {
@@ -222,6 +242,13 @@ export async function runReminders(now = new Date()) {
     const miss = await missingFor(cfg.branchId, t.date);
     if (miss.length) {
       await say(renderTpl(tpl.missing, { date: fmtDM(t.date), names: miss.map((p) => tagOf(p.name)).join(' '), bot: cfg.botName }));
+    }
+  }
+  if ((t.dow === 0 && t.h === 21) || (t.dow === 1 && t.h === 8)) {
+    const week = t.dow === 0 ? addDays(t.date, 1) : t.date;
+    const miss = await pendingOff(cfg.branchId, week);
+    if (miss.length && (await once(`offmiss:${week}:${t.dow}`))) {
+      await say(`⏰ Lịch OFF tuần ${fmtDM(week)} đến ${fmtDM(addDays(week, 6))} còn thiếu: ${miss.map((p) => tagOf(p.name)).join(' ')}${String.fromCharCode(10)}Anh Chị nhắn lịch off giúp em (nếu không off nhắn "không off"), nhớ tag "${cfg.botName}" ạ.`);
     }
   }
   if (t.h === 21 && t.dow !== 6) {

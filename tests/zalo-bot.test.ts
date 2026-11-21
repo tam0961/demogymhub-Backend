@@ -51,11 +51,22 @@ describe('parseOffMessage', () => {
     const r = parseOffMessage('LỊCH OFF\n1/ Thịnh: off thứ 3\n2/ Trang: off chủ nhật, thứ 5\n3/ Khánh: không off', new Date('2030-01-06T20:30:00+07:00'));
     expect(r?.week).toBe('2030-01-07');
     expect(r?.items).toEqual([
-      { name: 'Thịnh', days: [3] },
-      { name: 'Trang', days: [5, 8] },
-      { name: 'Khánh', days: [] },
+      { name: 'Thịnh', days: [3], kind: 'days' },
+      { name: 'Trang', days: [5, 8], kind: 'days' },
+      { name: 'Khánh', days: [], kind: 'none' },
     ]);
     expect(parseOffMessage('hello', new Date())).toBeNull();
+  });
+
+  it('assigns a Saturday message to next week, reads "thứ 4,5" and marks a blank line as not reported', () => {
+    const r = parseOffMessage('LỊCH OFF\n1/ Thịnh:\n2/ A. Khánh : off thứ 2\n3/ Trang: off thứ 4,5', new Date('2026-11-21T15:16:00+07:00'));
+    expect(r?.week).toBe('2026-11-23');
+    expect(r?.items).toEqual([
+      { name: 'Thịnh', days: [], kind: 'empty' },
+      { name: 'Khánh', days: [2], kind: 'days' },
+      { name: 'Trang', days: [4, 5], kind: 'days' },
+    ]);
+    expect(parseOffMessage('LỊCH OFF\n1/ Trang: off thứ 4', new Date('2026-11-18T10:00:00+07:00'))?.week).toBe('2026-11-16');
   });
 });
 
@@ -144,6 +155,29 @@ describe('zalo bot in the PT group', () => {
     const offs = await prisma.ptDayOff.findMany({ where: { branchId: A, trainer: { name: 'Le Thinh' }, date: { gte: dateOnly('2030-01-07'), lte: dateOnly('2030-01-13') } } });
     expect(offs.map((o) => o.date.toISOString().slice(0, 10))).toEqual(['2030-01-08']);
     expect(sent[0].text).toContain('lịch OFF tuần 07/01 đến 13/01');
+  });
+
+  it('records a Saturday OFF message for next week, keeps a blank PT pending and reminds on Sunday evening', async () => {
+    stubZalo();
+    sent.length = 0;
+    const cfg = await getBotCfg();
+    const text = 'LỊCH OFF\n1/ Thịnh:\n2/ A. Khánh : off thứ 2\n3/ Trang: off thứ 4,5';
+    await handleUpdate(cfg, { ...upd(text), message: { ...upd('').message, text, date: Math.floor(new Date('2031-03-01T15:16:00+07:00').getTime() / 1000) } });
+    const days = async (n: string) => (await prisma.ptDayOff.findMany({ where: { branchId: A, trainer: { name: n }, date: { gte: dateOnly('2031-02-24'), lte: dateOnly('2031-03-09') } }, orderBy: { date: 'asc' } })).map((o) => o.date.toISOString().slice(0, 10));
+    expect(await days('Nguyen Khanh')).toEqual(['2031-03-03']);
+    expect(await days('Tran Trang')).toEqual(['2031-03-05', '2031-03-06']);
+    expect(await days('Le Thinh')).toEqual([]);
+    expect(sent[0].text).toContain('tuần 03/03 đến 09/03');
+    expect(sent[0].text).toContain('Còn thiếu lịch OFF: @Thinh');
+    sent.length = 0;
+    await runReminders(new Date('2031-03-02T21:00:00+07:00'));
+    await runReminders(new Date('2031-03-02T21:02:00+07:00'));
+    expect(sent).toHaveLength(1);
+    expect(sent[0].text).toContain('còn thiếu: @Thinh');
+    sent.length = 0;
+    const t2 = 'LỊCH OFF\n1/ Thịnh: không off';
+    await handleUpdate(cfg, { ...upd(t2), message: { ...upd('').message, text: t2, date: Math.floor(new Date('2031-03-02T21:10:00+07:00').getTime() / 1000) } });
+    expect(sent[0].text).toBe('✅ Đã ghi nhận lịch OFF tuần 03/03 đến 09/03');
   });
 
   it('sends hourly reminders once, including missing PT and tomorrow class summary', async () => {

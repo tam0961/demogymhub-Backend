@@ -124,6 +124,71 @@ async function saleStaff(branchId: string, userId: string) {
   return u;
 }
 
+const editSchema = z.object({
+  package_id: uuid.optional(),
+  start_date: date.nullish(),
+  end_date: date.nullish(),
+  total_amount: z.number().int().min(0).optional(),
+  sessions_total: z.number().int().min(0).max(1000).nullish(),
+  sessions_left: z.number().int().min(0).max(1000).nullish(),
+  payment_due_date: date.nullish(),
+  note: z.string().trim().max(500).nullish(),
+  reason: z.string().trim().min(1).max(500),
+});
+
+contractsRouter.patch('/:id', authorize('contracts.edit'), async (req, res) => {
+  const id = uuid.parse(req.params.id);
+  const b = editSchema.parse(req.body);
+  const cur = await scoped(req, id);
+  const userId = req.auth!.userId;
+  const out = await prisma.$transaction(async (tx) => {
+    await lockContract(tx, id);
+    const f = await tx.contract.findUniqueOrThrow({ where: { id } });
+    if (f.status === 'cancelled') throw invalid(f, 'edit');
+    const day = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
+    const toDate = (s: string | null | undefined) => (s ? new Date(`${s}T00:00:00Z`) : null);
+    const data: Prisma.ContractUncheckedUpdateInput = {};
+    const from: Record<string, unknown> = {};
+    const to: Record<string, unknown> = {};
+    const DATE_FIELDS = ['startDate', 'endDate', 'paymentDueDate'];
+    const set = (key: string, field: keyof Prisma.ContractUncheckedUpdateInput, before: unknown, after: unknown) => {
+      if (JSON.stringify(before) === JSON.stringify(after)) return;
+      (data as Record<string, unknown>)[field as string] = DATE_FIELDS.includes(field as string) ? toDate(after as string | null) : after;
+      from[key] = before;
+      to[key] = after;
+    };
+    if (b.package_id !== undefined && b.package_id !== f.packageId) {
+      const pkg = await tx.package.findUnique({ where: { id: b.package_id } });
+      if (!pkg || (pkg.branchId && pkg.branchId !== f.branchId)) throw badRequest('PACKAGE_INVALID', 'Package not found for this branch');
+      set('package_id', 'packageId', f.packageId, pkg.id);
+      set('package_name', 'packageName', f.packageName, null);
+    }
+    if (b.start_date !== undefined) set('start_date', 'startDate', day(f.startDate), b.start_date ?? null);
+    if (b.end_date !== undefined) set('end_date', 'endDate', day(f.endDate), b.end_date ?? null);
+    if (b.payment_due_date !== undefined) set('payment_due_date', 'paymentDueDate', day(f.paymentDueDate), b.payment_due_date ?? null);
+    if (b.total_amount !== undefined) {
+      if (b.total_amount < f.paidAmount) throw badRequest('TOTAL_BELOW_PAID', 'Total amount cannot be lower than the amount already paid');
+      set('total_amount', 'totalAmount', f.totalAmount, b.total_amount);
+    }
+    if (b.sessions_total !== undefined) set('sessions_total', 'sessionsTotal', f.sessionsTotal, b.sessions_total ?? null);
+    if (b.sessions_left !== undefined) set('sessions_left', 'sessionsLeft', f.sessionsLeft, b.sessions_left ?? null);
+    if (b.note !== undefined) set('note', 'note', f.note, b.note ?? null);
+    const startD = 'startDate' in data ? (data.startDate as Date | null) : f.startDate;
+    const endD = 'endDate' in data ? (data.endDate as Date | null) : f.endDate;
+    if (startD && endD && endD < startD) throw badRequest('DATES_INVALID', 'End date cannot be before start date');
+    const total = 'sessionsTotal' in data ? (data.sessionsTotal as number | null) : f.sessionsTotal;
+    const left = 'sessionsLeft' in data ? (data.sessionsLeft as number | null) : f.sessionsLeft;
+    if (total != null && left != null && left > total) throw badRequest('SESSIONS_INVALID', 'Sessions left cannot exceed total sessions');
+    if (!Object.keys(data).length) throw badRequest('NOTHING_TO_UPDATE', 'No changes');
+    const u = await tx.contract.update({ where: { id }, data, include: { member: true, package: true } });
+    await addEvent(tx, id, 'edited', userId, b.reason, { from, to });
+    await syncMemberStatus(tx, f.memberId);
+    return u;
+  });
+  await audit(userId, 'contract.edited', { contract_id: cur.id, reason: b.reason }, req.ip, cur.id);
+  res.json({ data: contractToApi(out) });
+});
+
 contractsRouter.patch('/:id/staff', authorize('contracts.create'), async (req, res) => {
   const id = uuid.parse(req.params.id);
   const b = z.object({ sale_user_id: uuid.nullish(), pt_user_id: uuid.nullish() }).parse(req.body);
