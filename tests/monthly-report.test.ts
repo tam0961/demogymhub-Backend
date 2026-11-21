@@ -60,6 +60,7 @@ describe('monthly report', () => {
     expect(b).toMatchObject({ revenue: 2_000_000, contractsNew: 1, membersNew: 1, checkins: 1 });
     expect(r.sales.find((s) => s.name === `Sale ${sfx}`)?.revenue).toBe(2_000_000);
     expect(r.pts.find((p) => p.name === `PT ${sfx}`)).toMatchObject({ sessions: 1, classes: 0 });
+    expect(r.ptKpi.find((p) => p.name === `PT ${sfx}`)).toMatchObject({ sessions: 1, completed: 1, cancelled: 0, booked: 1 });
     expect(r.byCategory.find((c) => c.label === 'Gói member')?.revenue).toBeGreaterThanOrEqual(2_000_000);
     expect(r.totals.debtCount).toBeGreaterThanOrEqual(1);
   });
