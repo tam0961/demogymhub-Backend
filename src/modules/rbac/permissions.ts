@@ -126,6 +126,7 @@ export const ROLES: RoleDef[] = [
       'contracts.read',
       'contracts.sign',
       'contracts.activate',
+      'contracts.edit',
       'payments.create',
       'payments.read',
       'checkins.create',

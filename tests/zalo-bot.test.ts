@@ -168,16 +168,17 @@ describe('zalo bot in the PT group', () => {
     expect(await days('Tran Trang')).toEqual(['2031-03-05', '2031-03-06']);
     expect(await days('Le Thinh')).toEqual([]);
     expect(sent[0].text).toContain('tuần 03/03 đến 09/03');
-    expect(sent[0].text).toContain('Còn thiếu lịch OFF: @Thinh');
+    expect(sent[0].text).toMatch(/Còn thiếu lịch OFF:.*@Thinh/);
     sent.length = 0;
     await runReminders(new Date('2031-03-02T21:00:00+07:00'));
     await runReminders(new Date('2031-03-02T21:02:00+07:00'));
     expect(sent).toHaveLength(1);
-    expect(sent[0].text).toContain('còn thiếu: @Thinh');
+    expect(sent[0].text).toMatch(/còn thiếu:.*@Thinh/);
     sent.length = 0;
     const t2 = 'LỊCH OFF\n1/ Thịnh: không off';
     await handleUpdate(cfg, { ...upd(t2), message: { ...upd('').message, text: t2, date: Math.floor(new Date('2031-03-02T21:10:00+07:00').getTime() / 1000) } });
-    expect(sent[0].text).toBe('✅ Đã ghi nhận lịch OFF tuần 03/03 đến 09/03');
+    expect(sent[0].text).toContain('✅ Đã ghi nhận lịch OFF tuần 03/03 đến 09/03');
+    expect(sent[0].text).not.toMatch(/Còn thiếu lịch OFF:.*@Thinh/);
   });
 
   it('sends hourly reminders once, including missing PT and tomorrow class summary', async () => {

@@ -255,6 +255,9 @@ contractsRouter.post('/', authorize('contracts.create'), async (req, res) => {
     if (old.memberId !== member.id) throw conflict('MEMBER_MISMATCH', 'Contract belongs to a different member');
     if (!['active', 'expired', 'frozen'].includes(old.status)) throw invalid(old, 'renew');
     renewedFromId = old.id;
+  } else {
+    const prev = await prisma.contract.findFirst({ where: { memberId: member.id, status: { in: ['active', 'expired', 'frozen'] } }, orderBy: { createdAt: 'desc' }, select: { id: true } });
+    renewedFromId = prev?.id ?? null;
   }
   const created = await prisma.$transaction(async (tx) => {
     const c = await tx.contract.create({

@@ -7,6 +7,7 @@ const sfx = Date.now().toString(36);
 let BR = '';
 let owner = '';
 let recept = '';
+let sales = '';
 let pkgA = '';
 let pkgB = '';
 let cid = '';
@@ -18,6 +19,8 @@ beforeAll(async () => {
   owner = await tokenFor(`owner@ce${sfx}.test`);
   await makeUser(`rec@ce${sfx}.test`, 'receptionist', `ce${sfx}`);
   recept = await tokenFor(`rec@ce${sfx}.test`);
+  await makeUser(`sal@ce${sfx}.test`, 'sales', `ce${sfx}`);
+  sales = await tokenFor(`sal@ce${sfx}.test`);
   pkgA = (await prisma.package.create({ data: { name: `A ${sfx}`, type: 'session', category: 'pt_1on1', sessions: 10, price: 1000, branchId: BR } })).id;
   pkgB = (await prisma.package.create({ data: { name: `B ${sfx}`, type: 'month', category: 'member', durationDays: 30, price: 1000, branchId: BR } })).id;
   const m = await prisma.member.create({ data: { code: `CE${sfx}`, name: 'CE M', phone: `ce${sfx}`, branchId: BR } });
@@ -49,9 +52,10 @@ describe('PATCH /contracts/:id', () => {
     expect(d.status).toBe(400);
   });
 
-  it('needs a reason and the contracts.edit permission', async () => {
+  it('needs a reason, is allowed for the receptionist and refused for sales', async () => {
     expect((await request(app).patch(`/api/contracts/${cid}`).set(auth(owner)).send({ note: 'a' })).status).toBe(400);
-    expect((await request(app).patch(`/api/contracts/${cid}`).set(auth(recept)).send({ note: 'a', reason: 'x' })).status).toBe(403);
+    expect((await request(app).patch(`/api/contracts/${cid}`).set(auth(sales)).send({ note: 'a', reason: 'x' })).status).toBe(403);
+    expect((await request(app).patch(`/api/contracts/${cid}`).set(auth(recept)).send({ note: 'rec edit', reason: 'x' })).status).toBe(200);
   });
 
   it('refuses a cancelled contract', async () => {
