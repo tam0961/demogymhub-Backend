@@ -229,6 +229,8 @@ reportsRouter.get('/expiring', authorize('reports.view'), async (req, res) => {
   res.json({ data, meta: { days, total: data.length } });
 });
 
+const svcGroup = (p: { category: string; displayGroup: string | null }): 'gym' | 'pt' | 'group' => (p.displayGroup === 'pt_group' || p.category === 'pt_group' ? 'group' : p.category === 'member' ? 'gym' : 'pt');
+
 const servicesQ = z.object({ branch_id: z.string().uuid().optional(), days: z.coerce.number().int().refine((d) => [7, 30, 90, 365].includes(d)).default(30) });
 
 reportsRouter.get('/revenue-services', authorize('reports.view'), async (req, res) => {
@@ -237,15 +239,15 @@ reportsRouter.get('/revenue-services', authorize('reports.view'), async (req, re
   const today = dateOnly(todayVN());
   const from = dayRange(addDays(today, -(p.days - 1)).toISOString().slice(0, 10)).gte;
   const to = dayRange(today.toISOString().slice(0, 10)).lt;
-  const include = { contract: { select: { id: true, packageName: true, package: { select: { id: true, name: true, category: true } } } } } as const;
+  const include = { contract: { select: { id: true, packageName: true, package: { select: { id: true, name: true, category: true, displayGroup: true } } } } } as const;
   const [paid, refunded] = await Promise.all([
     prisma.payment.findMany({ where: { ...bf, status: { in: ['confirmed', 'refunded'] }, confirmedAt: { gte: from, lt: to } }, select: { amount: true, contract: include.contract } }),
     prisma.payment.findMany({ where: { ...bf, status: 'refunded', refundedAt: { gte: from, lt: to } }, select: { amount: true, contract: include.contract } }),
   ]);
-  const rows = new Map<string, { name: string; group: 'gym' | 'pt'; revenue: number; contracts: Set<string> }>();
-  const add = (x: { amount: number; contract: { id: string; packageName: string | null; package: { id: string; name: string; category: string } } | null }, sign: 1 | -1) => {
+  const rows = new Map<string, { name: string; group: 'gym' | 'pt' | 'group'; revenue: number; contracts: Set<string> }>();
+  const add = (x: { amount: number; contract: { id: string; packageName: string | null; package: { id: string; name: string; category: string; displayGroup: string | null } } | null }, sign: 1 | -1) => {
     const key = x.contract ? x.contract.package.id : 'retail';
-    const r = rows.get(key) ?? (x.contract ? { name: x.contract.packageName ?? x.contract.package.name, group: x.contract.package.category === 'member' ? 'gym' : 'pt', revenue: 0, contracts: new Set<string>() } : { name: 'Vé lẻ', group: 'gym' as const, revenue: 0, contracts: new Set<string>() });
+    const r = rows.get(key) ?? (x.contract ? { name: x.contract.packageName ?? x.contract.package.name, group: svcGroup(x.contract.package), revenue: 0, contracts: new Set<string>() } : { name: 'Vé lẻ', group: 'gym' as const, revenue: 0, contracts: new Set<string>() });
     r.revenue += sign * x.amount;
     if (sign === 1) r.contracts.add(x.contract?.id ?? `retail:${x.amount}:${r.contracts.size}`);
     rows.set(key, r);
@@ -253,7 +255,7 @@ reportsRouter.get('/revenue-services', authorize('reports.view'), async (req, re
   for (const x of paid) add(x, 1);
   for (const x of refunded) add(x, -1);
   const total = [...rows.values()].reduce((s, r) => s + r.revenue, 0);
-  const groups = (['gym', 'pt'] as const).map((g) => ({ key: g, revenue: [...rows.values()].filter((r) => r.group === g).reduce((s, r) => s + r.revenue, 0) }));
+  const groups = (['gym', 'pt', 'group'] as const).map((g) => ({ key: g, revenue: [...rows.values()].filter((r) => r.group === g).reduce((s, r) => s + r.revenue, 0) }));
   const items = [...rows.values()]
     .map((r) => ({ name: r.name, group: r.group, contracts: r.contracts.size, revenue: r.revenue, average: r.contracts.size ? Math.round(r.revenue / r.contracts.size) : null, share: total > 0 ? r.revenue / total : 0 }))
     .sort((a, b) => b.revenue - a.revenue);
@@ -313,6 +315,7 @@ const businessQ = z.object({
 });
 
 type Kind = 'member' | 'pt' | 'group';
+const pkgGroup = (p: { category: string; displayGroup: string | null }): 'member' | 'pt' | 'group' => (p.displayGroup === 'pt_group' || p.category === 'pt_group' ? 'group' : p.category === 'member' ? 'member' : 'pt');
 const kindOf = (p: { category: string; displayGroup: string | null }): Kind | null => (p.displayGroup === 'pt_group' || p.category === 'pt_group' ? 'group' : p.category === 'member' ? 'member' : p.category === 'pt_1on1' || p.category === 'pt_1on2' ? 'pt' : null);
 const fmtDay = (d: Date) => d.toISOString().slice(0, 10);
 
@@ -392,7 +395,7 @@ reportsRouter.get('/business', authorize('reports.view'), async (req, res) => {
   };
 
   const [activeContracts, expiredWindow, openRows, refundReq, recent, activityCheckins, activityPays, activityLeads, debtRows] = await Promise.all([
-    prisma.contract.findMany({ where: { ...bf, status: 'active' }, select: { packageName: true, packageId: true, package: { select: { name: true } } } }),
+    prisma.contract.findMany({ where: { ...bf, status: 'active' }, select: { packageName: true, packageId: true, package: { select: { name: true, category: true, displayGroup: true } } } }),
     prisma.contract.findMany({ where: { ...bf, status: { in: ['active', 'expired'] }, package: { category: 'member' }, endDate: { gte: addDays(today, -90), lt: today } }, select: { id: true } }),
     prisma.contract.findMany({ where: { ...bf, status: { in: ['draft', 'signed'] } }, select: { totalAmount: true } }),
     prisma.payment.findMany({ where: { ...bf, status: 'confirmed', refundRequestedAt: { not: null } }, select: { amount: true } }),
@@ -420,9 +423,9 @@ reportsRouter.get('/business', authorize('reports.view'), async (req, res) => {
     renew_rate: renewRate,
   };
 
-  const pkgMap = new Map<string, { name: string; contracts: number }>();
+  const pkgMap = new Map<string, { name: string; group: 'member' | 'pt' | 'group'; contracts: number }>();
   for (const c of activeContracts) {
-    const r = pkgMap.get(c.packageId) ?? { name: c.packageName ?? c.package.name, contracts: 0 };
+    const r = pkgMap.get(c.packageId) ?? { name: c.packageName ?? c.package.name, group: pkgGroup(c.package), contracts: 0 };
     r.contracts++;
     pkgMap.set(c.packageId, r);
   }
