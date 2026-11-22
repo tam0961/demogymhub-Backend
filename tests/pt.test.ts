@@ -27,7 +27,7 @@ beforeAll(async () => {
   memberId = m.id;
   const pkg = await prisma.package.create({ data: { name: `PT ${id}`, type: 'session', category: 'pt_1on1', sessions: 2, price: 1000, branchId: nb } });
   const c = await prisma.contract.create({
-    data: { code: `C${id}`, memberId, packageId: pkg.id, branchId: nb, status: 'active', totalAmount: 1000, sessionsTotal: 2, sessionsLeft: 2 },
+    data: { code: `C${id}`, memberId, packageId: pkg.id, branchId: nb, status: 'active', totalAmount: 1000, sessionsTotal: 2, sessionsLeft: 2, ptUserId: trainerId },
   });
   contractId = c.id;
   const mpkg = await prisma.package.create({ data: { name: `Mem ${id}`, type: 'month', durationDays: 30, price: 1000, branchId: nb } });

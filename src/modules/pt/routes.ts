@@ -47,7 +47,7 @@ const toApi = (s: Row) => ({
 
 const PT_1ON_CATEGORIES = ['pt_1on1', 'pt_1on2'];
 
-async function checkPtContract(tx: Tx, memberId: string, contractId: string, branchId: string) {
+async function checkPtContract(tx: Tx, memberId: string, contractId: string, branchId: string, trainerId: string, category?: 'pt_1on1' | 'pt_1on2') {
   const elig = await ptEligibility(memberId);
   if (!elig.member_package.ok) throw conflict('MEMBER_PACKAGE_EXPIRED', 'Member package is no longer valid');
   await lockContract(tx, contractId);
@@ -56,6 +56,8 @@ async function checkPtContract(tx: Tx, memberId: string, contractId: string, bra
   if (!['active', 'expired'].includes(c.status) || c.sessionsTotal == null || !PT_1ON_CATEGORIES.includes(c.package.category)) {
     throw badRequest('CONTRACT_INVALID', 'Contract must be a usable PT 1:1 or 1:2 package');
   }
+  if (c.ptUserId !== trainerId) throw conflict('PT_MISMATCH', 'This customer is not assigned to the selected PT');
+  if (category && c.package.category !== category) throw conflict('PACKAGE_KIND_MISMATCH', category === 'pt_1on2' ? 'A 1-2 session needs two customers with a PT 1:2 package' : 'A 1-1 session needs a PT 1:1 package');
   if (!ptUsable({ status: c.status, endDate: c.endDate, sessionsTotal: c.sessionsTotal, category: c.package.category }, dateOnly(todayVN()))) {
     throw conflict('PT_USAGE_EXPIRED', 'PT package is past its usage deadline');
   }
@@ -126,6 +128,7 @@ const createSchema = z.object({
   note: z.string().trim().max(500).nullish(),
   branch_id: z.string().uuid().optional(),
   quick: z.boolean().optional(),
+  partner: z.object({ member_id: z.string().uuid(), contract_id: z.string().uuid() }).nullish(),
 });
 
 ptRouter.post('/sessions', authorize('pt_sessions.create'), async (req, res) => {
@@ -147,24 +150,28 @@ ptRouter.post('/sessions', authorize('pt_sessions.create'), async (req, res) => 
       tx.ptSession.findFirst({ where: { status: { in: ['scheduled', 'completed'] }, startAt: { lt: endAt }, endAt: { gt: startAt }, ...who }, select: { id: true } });
     if (await busy({ trainerId: b.trainer_id })) throw conflict('PT_BUSY', 'Trainer already has a session in this time');
     if (b.member_id && (await busy({ memberId: b.member_id }))) throw conflict('MEMBER_BUSY', 'Member already has a session in this time');
-    if (b.member_id && b.contract_id) await checkPtContract(tx, b.member_id, b.contract_id, branchId);
-    return tx.ptSession.create({
-      data: {
-        branchId,
-        trainerId: b.trainer_id,
-        memberId: b.member_id ?? null,
-        contractId: b.contract_id ?? null,
-        startAt,
-        endAt,
-        note: b.note ?? null,
-        source: b.quick ? 'quick' : 'manual',
-        createdBy: req.auth!.userId,
-      },
-      include,
-    });
+    if (b.partner && !(b.member_id && b.contract_id)) throw badRequest('PAIR_INCOMPLETE', 'A 1-2 session needs two customers');
+    if (b.partner && b.partner.member_id === b.member_id) throw badRequest('PAIR_DUPLICATE', 'The two customers must be different');
+    const kind = b.partner ? 'pt_1on2' : b.contract_id ? 'pt_1on1' : undefined;
+    if (b.member_id && b.contract_id) await checkPtContract(tx, b.member_id, b.contract_id, branchId, b.trainer_id, kind);
+    if (b.partner) {
+      const pm = await tx.member.findUnique({ where: { id: b.partner.member_id } });
+      if (!pm || pm.branchId !== branchId) throw notFound('Member not found');
+      if (await busy({ memberId: b.partner.member_id })) throw conflict('MEMBER_BUSY', 'Member already has a session in this time');
+      await checkPtContract(tx, b.partner.member_id, b.partner.contract_id, branchId, b.trainer_id, 'pt_1on2');
+    }
+    const make = (memberId: string | null, contractId: string | null) =>
+      tx.ptSession.create({
+        data: { branchId, trainerId: b.trainer_id, memberId, contractId, startAt, endAt, note: b.note ?? null, source: b.quick ? 'quick' : 'manual', createdBy: req.auth!.userId },
+        include,
+      });
+    const first = await make(b.member_id ?? null, b.contract_id ?? null);
+    const second = b.partner ? await make(b.partner.member_id, b.partner.contract_id) : null;
+    return { first, second };
   });
-  await audit(req.auth!.userId, 'pt_session.created', { after: toApi(created) }, req.ip, created.id);
-  res.status(201).json({ data: toApi(created) });
+  await audit(req.auth!.userId, 'pt_session.created', { after: toApi(created.first) }, req.ip, created.first.id);
+  if (created.second) await audit(req.auth!.userId, 'pt_session.created', { after: toApi(created.second) }, req.ip, created.second.id);
+  res.status(201).json({ data: toApi(created.first), ...(created.second && { partner: toApi(created.second) }) });
 });
 
 async function loadSession(req: Request) {
@@ -193,7 +200,7 @@ ptRouter.post('/sessions/:id/assign', async (req, res) => {
       select: { id: true },
     });
     if (clash) throw conflict('MEMBER_BUSY', 'Member already has a session in this time');
-    if (b.contract_id) await checkPtContract(tx, b.member_id, b.contract_id, s.branchId);
+    if (b.contract_id) await checkPtContract(tx, b.member_id, b.contract_id, s.branchId, s.trainerId, 'pt_1on1');
     return tx.ptSession.update({ where: { id: s.id }, data: { memberId: b.member_id, contractId: b.contract_id ?? null }, include });
   });
   await audit(req.auth!.userId, 'pt_session.assigned', { after: toApi(updated) }, req.ip, s.id);
@@ -273,7 +280,7 @@ ptRouter.patch('/sessions/:id', authorize('pt_sessions.create'), async (req, res
       tx.ptSession.findFirst({ where: { id: { not: s.id }, status: { in: ['scheduled', 'completed'] }, startAt: { lt: endAt }, endAt: { gt: startAt }, ...who }, select: { id: true } });
     if (await busy({ trainerId })) throw conflict('PT_BUSY', 'Trainer already has a session in this time');
     if (s.memberId && (await busy({ memberId: s.memberId }))) throw conflict('MEMBER_BUSY', 'Member already has a session in this time');
-    if (s.memberId && contractId && contractId !== s.contractId) await checkPtContract(tx, s.memberId, contractId, s.branchId);
+    if (s.memberId && contractId && contractId !== s.contractId) await checkPtContract(tx, s.memberId, contractId, s.branchId, trainerId);
     return tx.ptSession.update({ where: { id: s.id }, data: { trainerId, startAt, endAt, contractId }, include });
   });
   await audit(req.auth!.userId, 'pt_session.updated', { before: toApi(s), after: toApi(out) }, req.ip, s.id);

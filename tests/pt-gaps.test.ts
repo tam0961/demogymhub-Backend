@@ -21,7 +21,7 @@ async function mkMember(category: 'pt_1on1' | 'pt_group', sessions = 3) {
   await prisma.contract.create({ data: { code: `CM${id}`, memberId: m.id, packageId: mpkg.id, branchId: nb, status: 'active', totalAmount: 1000 } });
   const pkg = await prisma.package.create({ data: { name: `PT ${id}`, type: 'session', category, sessions, price: 1000, branchId: nb } });
   const c = await prisma.contract.create({
-    data: { code: `C${id}`, memberId: m.id, packageId: pkg.id, branchId: nb, status: 'active', totalAmount: 1000, sessionsTotal: sessions, sessionsLeft: sessions },
+    data: { code: `C${id}`, memberId: m.id, packageId: pkg.id, branchId: nb, status: 'active', totalAmount: 1000, sessionsTotal: sessions, sessionsLeft: sessions, ptUserId: category === 'pt_1on1' ? trainerId : null },
   });
   return { memberId: m.id, contractId: c.id };
 }
@@ -62,6 +62,7 @@ describe('pt 1:1 no-show, edit and cancel rule', () => {
     expect(ok.body.data.start_at).toBe(new Date('2033-01-11T14:00:00+07:00').toISOString());
     const other = await mkMember('pt_1on1');
     const otherTrainer = (await makeUser(`gq${u()}@t.local`, 'trainer', 'nb')).id;
+    await prisma.contract.update({ where: { id: other.contractId }, data: { ptUserId: otherTrainer } });
     const c = await book(other.memberId, other.contractId, '2033-01-11T16:00:00+07:00', { trainer_id: otherTrainer });
     expect((await request(app).patch(`/api/pt/sessions/${c.body.data.id}`).set(h(reception)).send({ trainer_id: trainerId, start_at: '2033-01-11T14:30:00+07:00' })).status).toBe(409);
     expect((await request(app).patch(`/api/pt/sessions/${a.body.data.id}`).set(h(trainerTok)).send({ start_at: '2033-01-11T10:00:00+07:00' })).status).toBe(403);
@@ -112,5 +113,43 @@ describe('group waitlist', () => {
     expect(after.deducted).toBe(true);
     expect(await left(b.contractId)).toBe(2);
     expect((await prisma.groupRegistration.findUniqueOrThrow({ where: { id: rd.body.data.id } })).status).toBe('waitlist');
+  });
+});
+
+describe('pt booking: customers must belong to the PT, 1-2 needs two', () => {
+  it('rejects a customer attached to another PT and a PT 1:2 package booked alone', async () => {
+    const other = await mkMember('pt_1on1');
+    const otherTrainer = (await makeUser(`gz${u()}@t.local`, 'trainer', 'nb')).id;
+    await prisma.contract.update({ where: { id: other.contractId }, data: { ptUserId: otherTrainer } });
+    const bad = await book(other.memberId, other.contractId, '2033-03-01T09:00:00+07:00');
+    expect(bad.status).toBe(409);
+    expect(bad.body.error.code).toBe('PT_MISMATCH');
+    const duo = await mkMember('pt_1on1');
+    await prisma.package.updateMany({ where: { contracts: { some: { id: duo.contractId } } }, data: { category: 'pt_1on2' } });
+    await prisma.contract.update({ where: { id: duo.contractId }, data: { ptUserId: trainerId } });
+    const alone = await book(duo.memberId, duo.contractId, '2033-03-01T11:00:00+07:00');
+    expect(alone.status).toBe(409);
+    expect(alone.body.error.code).toBe('PACKAGE_KIND_MISMATCH');
+  });
+
+  it('creates a 1-2 session for two customers of the PT in one request', async () => {
+    const mk = async () => {
+      const x = await mkMember('pt_1on1', 4);
+      await prisma.package.updateMany({ where: { contracts: { some: { id: x.contractId } } }, data: { category: 'pt_1on2' } });
+      await prisma.contract.update({ where: { id: x.contractId }, data: { ptUserId: trainerId } });
+      return x;
+    };
+    const a = await mk();
+    const b = await mk();
+    const ok = await request(app).post('/api/pt/sessions').set(h(reception)).send({ member_id: a.memberId, contract_id: a.contractId, partner: { member_id: b.memberId, contract_id: b.contractId }, trainer_id: trainerId, start_at: '2033-03-02T09:00:00+07:00', duration_min: 60 });
+    expect(ok.status).toBe(201);
+    expect(ok.body.data.member.id).toBe(a.memberId);
+    expect(ok.body.partner.member.id).toBe(b.memberId);
+    expect(ok.body.partner.start_at).toBe(ok.body.data.start_at);
+    const same = await request(app).post('/api/pt/sessions').set(h(reception)).send({ member_id: a.memberId, contract_id: a.contractId, partner: { member_id: a.memberId, contract_id: a.contractId }, trainer_id: trainerId, start_at: '2033-03-02T15:00:00+07:00', duration_min: 60 });
+    expect(same.status).toBe(400);
+    const c = await mk();
+    const third = await request(app).post('/api/pt/sessions').set(h(reception)).send({ member_id: c.memberId, contract_id: c.contractId, trainer_id: trainerId, start_at: '2033-03-02T09:00:00+07:00', duration_min: 60 });
+    expect(third.status).toBe(409);
   });
 });
