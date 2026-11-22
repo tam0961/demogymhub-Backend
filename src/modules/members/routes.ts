@@ -119,10 +119,16 @@ membersRouter.get('/', authorize('members.read'), async (req, res) => {
     prisma.member.findMany({ where, include: { branch: true }, orderBy: { createdAt: 'desc' }, skip: (q.page - 1) * q.limit, take: q.limit }),
   ]);
   const [sum, photos] = await Promise.all([memberContractSummaries(rows.map((r) => r.id)), photoTimes(rows.map((r) => r.id))]);
-  const debtRows = await prisma.contract.findMany({ where: { memberId: { in: rows.map((r) => r.id) }, status: { notIn: ['draft', 'cancelled'] } }, select: { memberId: true, totalAmount: true, paidAmount: true } });
+  const debtRows = await prisma.contract.findMany({ where: { memberId: { in: rows.map((r) => r.id) }, status: { notIn: ['draft', 'cancelled'] } }, select: { memberId: true, totalAmount: true, paidAmount: true, paymentDueDate: true } });
   const debt = new Map<string, number>();
-  for (const c of debtRows) debt.set(c.memberId, (debt.get(c.memberId) ?? 0) + Math.max(0, c.totalAmount - c.paidAmount));
-  res.json({ data: rows.map((r) => ({ ...withExtras(r, r.branch, sum.current.get(r.id) ?? null, sum.pt.get(r.id) ?? null, photos.get(r.id)), debt_amount: debt.get(r.id) ?? 0 })), meta: { page: q.page, limit: q.limit, total } });
+  const debtDue = new Map<string, string>();
+  for (const c of debtRows) {
+    const owed = Math.max(0, c.totalAmount - c.paidAmount);
+    debt.set(c.memberId, (debt.get(c.memberId) ?? 0) + owed);
+    const d = owed > 0 && c.paymentDueDate ? c.paymentDueDate.toISOString().slice(0, 10) : null;
+    if (d && (!debtDue.has(c.memberId) || d < debtDue.get(c.memberId)!)) debtDue.set(c.memberId, d);
+  }
+  res.json({ data: rows.map((r) => ({ ...withExtras(r, r.branch, sum.current.get(r.id) ?? null, sum.pt.get(r.id) ?? null, photos.get(r.id)), debt_amount: debt.get(r.id) ?? 0, debt_due_date: debtDue.get(r.id) ?? null })), meta: { page: q.page, limit: q.limit, total } });
 });
 
 membersRouter.get('/:id', authorize('members.read'), async (req, res) => {
