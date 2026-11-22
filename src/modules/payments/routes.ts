@@ -185,7 +185,7 @@ paymentsRouter.get('/', authorize('payments.read'), async (req, res) => {
   if (q.date) where.createdAt = dayRange(q.date);
   const [total, rows] = await Promise.all([
     prisma.payment.count({ where }),
-    prisma.payment.findMany({ where, orderBy: { createdAt: 'desc' }, skip: (q.page - 1) * q.limit, take: q.limit, include: { contract: { select: { id: true, code: true, member: { select: { name: true } } } } } }),
+    prisma.payment.findMany({ where, orderBy: { createdAt: 'desc' }, skip: (q.page - 1) * q.limit, take: q.limit, include: { contract: { select: { id: true, code: true, member: { select: { id: true, code: true, name: true } } } } } }),
   ]);
   const staffIds = [...new Set(rows.flatMap((r) => (r.createdBy ? [r.createdBy] : [])))];
   const staff = staffIds.length ? await prisma.user.findMany({ where: { id: { in: staffIds } }, select: { id: true, name: true } }) : [];
