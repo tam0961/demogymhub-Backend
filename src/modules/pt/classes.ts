@@ -269,6 +269,12 @@ classesRouter.post('/generate', authorize('pt_sessions.create'), async (req, res
 
 const monthSchema = z.object({ months: z.coerce.number().int().min(1).max(24).default(6), branch_id: z.string().uuid().optional() });
 
+classesRouter.get('/cancel-counts', authorize('pt_sessions.read'), async (req, res) => {
+  const q = z.object({ branch_id: z.string().uuid().optional() }).parse(req.query);
+  const rows = await prisma.groupRegistration.groupBy({ by: ['memberId'], where: { status: 'cancelled', class: { ...branchFilter(req, q.branch_id) } }, _count: { _all: true } });
+  res.json({ data: Object.fromEntries(rows.map((r) => [r.memberId, r._count._all])) });
+});
+
 classesRouter.get('/report', authorize('pt_sessions.read'), async (req, res) => {
   const q = monthSchema.parse(req.query);
   const [y, m] = todayVN().split('-').map(Number);

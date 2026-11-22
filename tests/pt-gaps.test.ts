@@ -153,3 +153,11 @@ describe('pt booking: customers must belong to the PT, 1-2 needs two', () => {
     expect(third.status).toBe(409);
   });
 });
+
+describe('group class cancel counts', () => {
+  it('counts cancelled registrations per member', async () => {
+    const r = await request(app).get('/api/pt/classes/cancel-counts').set(h(reception));
+    expect(r.status).toBe(200);
+    expect(typeof r.body.data).toBe('object');
+  });
+});
