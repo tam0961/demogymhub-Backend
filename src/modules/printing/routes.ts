@@ -5,7 +5,7 @@ import { prisma } from '../../lib/prisma';
 import { authenticate, authorize } from '../../middlewares/auth';
 
 const KEY = 'print_templates';
-export const TEMPLATE_KEYS = ['contract_member', 'contract_pt', 'contract_deposit', 'freeze_form', 'transfer_form'] as const;
+export const TEMPLATE_KEYS = ['contract_member', 'contract_pt', 'contract_deposit', 'freeze_form', 'transfer_form', 'receipt'] as const;
 export type TemplateKey = (typeof TEMPLATE_KEYS)[number];
 type Tpl = { title: string; body: string };
 
@@ -30,6 +30,20 @@ export const DEFAULTS: Record<TemplateKey, Tpl> = {
   freeze_form: {
     title: 'PHIẾU BẢO LƯU HỢP ĐỒNG',
     body: `${HEAD}\n\nNgày lập: {{ngay_in}}\n${PARTIES}\n\nHợp đồng: {{ma_hop_dong}} - {{goi_tap}}\nHiệu lực hiện tại: {{ngay_bat_dau}} đến {{ngay_het_han}}\nSố ngày bảo lưu: {{so_ngay_bao_luu}}\nLý do: {{ly_do}}\n\nSau thời gian bảo lưu, hợp đồng tự động hoạt động trở lại và ngày hết hạn được cộng thêm số ngày đã bảo lưu.\n\n${SIGN}`,
+  },
+  receipt: {
+    title: 'PHIẾU THU',
+    body: `${HEAD}
+
+Mã phiếu thu: {{ma_phieu_thu}}      Ngày thu: {{ngay_thu}}
+Hội viên: {{ten_hoi_vien}} (Mã: {{ma_hoi_vien}}) - SĐT: {{sdt}}
+
+Hợp đồng: {{ma_hop_dong}} - {{goi_tap}}
+Số tiền thu: {{so_tien}}
+Hình thức: {{hinh_thuc}}
+Còn thiếu sau phiếu này: {{con_thieu}}
+
+Nhân viên thu: {{nhan_vien_thu}}\n\nNgười nộp tiền ký tên`,
   },
   transfer_form: {
     title: 'PHIẾU CHUYỂN NHƯỢNG HỢP ĐỒNG',
