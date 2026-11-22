@@ -193,6 +193,7 @@ contractsRouter.patch('/:id/staff', authorize('contracts.create'), async (req, r
   const id = uuid.parse(req.params.id);
   const b = z.object({ sale_user_id: uuid.nullish(), pt_user_id: uuid.nullish() }).parse(req.body);
   const cur = await scoped(req, id);
+  if (b.pt_user_id && b.pt_user_id === cur.ptUserId) throw conflict('PT_UNCHANGED', 'New PT must be different from the current PT');
   const pkg = await prisma.package.findUniqueOrThrow({ where: { id: cur.packageId }, select: { category: true } });
   if (b.pt_user_id === null && isPtCategory(pkg.category)) throw badRequest('PT_REQUIRED', 'PT in charge is required for PT packages');
   const data: { saleUserId?: string | null; saleName?: string | null; ptUserId?: string | null; ptName?: string | null } = {};
