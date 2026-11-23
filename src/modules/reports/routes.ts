@@ -7,10 +7,12 @@ import { authenticate, authorize, authorizeAny } from '../../middlewares/auth';
 import { overdueDays, paymentToApi } from '../contracts/service';
 import { branchFilter } from '../rbac/scope';
 import { computeHealth, statsRouter } from './stats';
+import { workRouter } from './work';
 
 export const reportsRouter = Router();
 reportsRouter.use(authenticate);
 reportsRouter.use(statsRouter);
+reportsRouter.use('/work', workRouter);
 
 const q = z.object({ branch_id: z.string().uuid().optional(), date: z.string().regex(DATE_RE).optional() });
 const METHODS = ['cash', 'transfer', 'vietqr', 'ewallet', 'card'] as const;

@@ -128,10 +128,6 @@ paymentsRouter.post('/', authorize('payments.create'), async (req, res) => {
   if (existing) return res.status(200).json({ data: paymentToApi(existing) });
 
   const shift = await prisma.shift.findFirst({ where: { userId, closedAt: null } });
-  if (b.method === 'cash') {
-    if (!shift) throw conflict('SHIFT_REQUIRED', 'Open a shift before taking cash');
-    if (shift.branchId !== contract.branchId) throw conflict('SHIFT_BRANCH_MISMATCH', 'Open shift belongs to a different branch');
-  }
 
   let payment: Payment;
   try {
@@ -241,8 +237,7 @@ paymentsRouter.post('/:id/refund', authorize('payments.refund'), async (req, res
   let refundShiftId: string | null = null;
   if (p.method === 'cash') {
     const shift = await prisma.shift.findFirst({ where: { userId, closedAt: null } });
-    if (!shift) throw conflict('SHIFT_REQUIRED', 'Open a shift before refunding cash');
-    refundShiftId = shift.id;
+    refundShiftId = shift?.id ?? null;
   }
   const out = await prisma.$transaction(async (tx) => {
     await lockContract(tx, p.contractId);

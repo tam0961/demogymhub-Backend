@@ -356,10 +356,6 @@ async function pendingShiftFor(actor: Actor, c: { branchId: string }, input: Tic
   const money = fee > 0 ? (input.paid ?? fee) : fee;
   if (money === 0 || method !== 'cash') return null;
   const shift = await openShift(actor.id);
-  if (strictShift) {
-    if (!shift) throw conflict('SHIFT_REQUIRED', 'Open a shift before taking or paying out cash');
-    if (shift.branchId !== c.branchId) throw conflict('SHIFT_BRANCH_MISMATCH', 'Open shift belongs to a different branch');
-  }
   return shift && shift.branchId === c.branchId ? shift.id : null;
 }
 

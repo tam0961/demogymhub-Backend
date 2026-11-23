@@ -343,10 +343,6 @@ describe('MVP journey', () => {
     expect(unpaid.status).toBe(409);
     expect(unpaid.body.error.code).toBe('PAYMENT_REQUIRED');
 
-    const noShift = await request(app).post('/api/payments').set(h('receptionist')).send({ contract_id: c.id, method: 'cash', amount: 200000 });
-    expect(noShift.status).toBe(409);
-    expect(noShift.body.error.code).toBe('SHIFT_REQUIRED');
-
     await closeOpenShifts(ids.receptionist);
     const shift = await request(app).post('/api/shifts/open').set(h('receptionist')).send({ opening_cash: 100000 });
     expect(shift.status).toBe(201);

@@ -103,10 +103,6 @@ dayTicketsRouter.post('/', authorize('day_tickets.create'), async (req, res) => 
   if (inside) throw conflict('TICKET_ACTIVE', 'Số điện thoại này đã có vé hôm nay và vẫn đang trong phòng tập');
 
   const shift = await prisma.shift.findFirst({ where: { userId, closedAt: null } });
-  if (b.method === 'cash') {
-    if (!shift) throw conflict('SHIFT_REQUIRED', 'Cần mở ca trước khi thu tiền mặt');
-    if (shift.branchId !== branchId) throw conflict('SHIFT_BRANCH_MISMATCH', 'Ca đang mở thuộc chi nhánh khác');
-  }
   const amount = await dayTicketPrice();
   const now = new Date();
   const out = await prisma.$transaction(async (tx) => {

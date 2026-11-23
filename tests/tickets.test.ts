@@ -283,14 +283,11 @@ describe('409 cases, scoping and money rules', () => {
     expect((await post(rec, pt.id, { type: 'upgrade', package_id: pk.grp })).body.error.code).toBe('CATEGORY_MISMATCH');
   });
 
-  it('needs an open shift to take cash directly', async () => {
+  it('takes cash without an open shift', async () => {
     await prisma.shift.updateMany({ where: { userId: recId, closedAt: null }, data: { closedAt: new Date() } });
     const c = await mkContract({ pkg: 'm3', total: 3_000_000, paid: 3_000_000, startAgo: 5, days: 90 });
     const r = await post(rec, c.id, { type: 'upgrade', package_id: pk.m6, paid: 100_000, method: 'cash' });
-    expect(r.status).toBe(409);
-    expect(r.body.error.code).toBe('SHIFT_REQUIRED');
-    const noCash = await post(rec, c.id, { type: 'upgrade', package_id: pk.m6, paid: 0, method: 'cash' });
-    expect(noCash.status).toBe(201);
+    expect(r.status).toBe(201);
     await prisma.shift.create({ data: { userId: recId, branchId: A, openingCash: 0 } });
   });
 

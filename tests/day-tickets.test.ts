@@ -41,14 +41,13 @@ describe('day tickets', () => {
     expect(p.shiftId).toBeTruthy();
   });
 
-  it('maps momo to ewallet and needs an open shift only for cash', async () => {
+  it('maps momo to ewallet and takes cash without an open shift', async () => {
     const r = await request(app).post('/api/day-tickets').set(hr()).send({ name: 'Momo', phone: ph(2), method: 'momo' });
     expect(r.status).toBe(201);
     expect(r.body.data.method).toBe('ewallet');
     const noShift = await request(app).post('/api/day-tickets').set(hb()).send({ name: 'X', phone: ph(3), method: 'cash' });
-    expect(noShift.status).toBe(409);
-    expect(JSON.stringify(noShift.body)).toContain('SHIFT_REQUIRED');
-    await request(app).post('/api/day-tickets').set(hb()).send({ name: 'X', phone: ph(3), method: 'transfer' }).expect(201);
+    expect(noShift.status).toBe(201);
+    expect(noShift.body.data.method).toBe('cash');
   });
 
   it('blocks a phone that is still inside, allows it again after checkout', async () => {
