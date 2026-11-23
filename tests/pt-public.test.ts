@@ -91,14 +91,6 @@ describe('public class booking', () => {
     expect(reg.source).toBe('web');
   });
 
-  it('refuses sessions from two different weeks', async () => {
-    const day = 86400000;
-    const far = await prisma.groupClass.create({ data: { branchId: nb, startAt: new Date(new Date(sundayEvening(20)).getTime() + 3 * day), endAt: new Date(new Date(sundayEvening(21)).getTime() + 3 * day), capacity: 3 } });
-    const r = await request(app).post('/api/public/book').send({ phone: memberPhone, class_ids: [classA, far.id] });
-    expect(r.status).toBe(400);
-    expect(r.body.error.code).toBe('MIXED_WEEK');
-  });
-
   it('refuses more than five sessions', async () => {
     const ids = [0, 1, 2, 3, 4, 5].map((i) => `00000000-0000-4000-8000-00000000000${i}`);
     expect((await request(app).post('/api/public/book').send({ phone: memberPhone, class_ids: ids })).status).toBe(400);

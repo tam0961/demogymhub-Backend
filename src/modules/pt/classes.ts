@@ -416,7 +416,6 @@ classesRouter.post('/registrations/:id/cancel', authorize('pt_sessions.cancel'),
   const id = z.string().uuid().parse(req.params.id);
   const found = await prisma.groupRegistration.findUnique({ where: { id }, include: { class: { select: { branchId: true, startAt: true } } } });
   if (!found || !branchAllowed(req.access!, found.class.branchId)) throw notFound('Registration not found');
-  assertOpen(req, found.class.startAt);
   const out = await prisma.$transaction(async (tx) => {
     await lockKey(tx, 'class:' + found.classId);
     const cur = await tx.groupRegistration.findUniqueOrThrow({ where: { id } });

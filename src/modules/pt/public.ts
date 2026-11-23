@@ -7,6 +7,7 @@ import { prisma } from '../../lib/prisma';
 import { hit, redis } from '../../lib/redis';
 import { ptEligibility } from '../contracts/service';
 import { enqueueSheetWrites } from '../sheetsync/write';
+import { sendBookingMails } from './booking-mail';
 import { lockAt, registerInTx } from './classes';
 import { normalizePhone } from './sheet-import';
 
@@ -26,11 +27,6 @@ export function visibleWeek(now = new Date()) {
   const sunday = new Date(monday.getTime() + 6 * 86400000);
   return { from: monday.toISOString().slice(0, 10), to: sunday.toISOString().slice(0, 10) };
 }
-
-const weekStart = (d: Date) => {
-  const vn = new Date(d.getTime() + VN_MS);
-  return new Date(Date.UTC(vn.getUTCFullYear(), vn.getUTCMonth(), vn.getUTCDate() - ((vn.getUTCDay() + 6) % 7), 12)).toISOString().slice(0, 10);
-};
 
 const maskEmail = (e: string | null) => {
   if (!e) return null;
@@ -110,20 +106,6 @@ publicRouter.post('/book', async (req, res) => {
   const elig = await ptEligibility(member.id);
   if (!elig.member_package.ok) throw conflict('MEMBER_PACKAGE_EXPIRED', 'Member package is no longer valid');
 
-  const picked = await prisma.groupClass.findMany({ where: { id: { in: ids } }, select: { id: true, branchId: true, startAt: true } });
-  if (picked.length) {
-    const mondays = new Set(picked.map((c) => weekStart(c.startAt)));
-    if (mondays.size > 1) throw new HttpError(400, 'MIXED_WEEK', 'Sessions must be in the same week');
-    const monday = [...mondays][0];
-    const mondayAt = new Date(`${monday}T00:00:00+07:00`);
-    const taken = await prisma.groupRegistration.findMany({
-      where: { memberId: member.id, status: { in: ['booked', 'attended', 'absent'] }, class: { startAt: { gte: mondayAt, lt: new Date(mondayAt.getTime() + 7 * 86400000) } } },
-      select: { classId: true },
-    });
-    const have = new Set(taken.map((t) => t.classId));
-    if (have.size + picked.filter((c) => !have.has(c.id)).length > MAX_PICK) throw new HttpError(400, 'WEEK_LIMIT', `At most ${MAX_PICK} sessions per week`);
-  }
-
   const lockCheck = (startAt: Date) => {
     if (new Date() >= lockAt(startAt)) throw conflict('CLASS_LOCKED', 'Registration is locked from 21:00 the day before the class');
   };
@@ -144,6 +126,7 @@ publicRouter.post('/book', async (req, res) => {
       return done;
     });
     void enqueueSheetWrites(booked.map((c) => c.reg_id));
+    void sendBookingMails(member, booked.map((c) => ({ date: vnDayOf(c.start_at), start: hm(c.start_at), end: hm(c.end_at), muscle_group: c.muscle_group })));
     res.status(201).json({
       data: { name: member.name, booked: booked.map((c) => ({ class_id: c.class_id, date: vnDayOf(c.start_at), start: hm(c.start_at), end: hm(c.end_at), muscle_group: c.muscle_group })) },
     });

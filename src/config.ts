@@ -33,6 +33,9 @@ const schema = z.object({
   VIETQR_BANK_ID: z.string().default(''),
   VIETQR_ACCOUNT_NO: z.string().default(''),
   VIETQR_ACCOUNT_NAME: z.string().default(''),
+  MAIL_API_KEY: z.string().default(''),
+  MAIL_FROM: z.string().default(''),
+  BOOKING_ADMIN_EMAIL: z.string().default(''),
 });
 
 const parsed = schema.safeParse(process.env);
