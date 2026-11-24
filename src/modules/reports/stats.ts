@@ -93,6 +93,20 @@ statsRouter.get('/alerts', authorize('reports.view'), async (req, res) => {
   res.json({ data: items.filter((i) => i.count > 0).sort((a, b) => b.impact - a.impact) });
 });
 
+statsRouter.get('/checkin-heatmap', authorize('checkins.read'), async (req, res) => {
+  const bf = branchFilter(req, q.parse(req.query).branch_id);
+  const today = dateOnly(todayVN());
+  const from = dayRange(fmtDay(addDays(today, -29))).gte;
+  const to = dayRange(fmtDay(today)).lt;
+  const checkins = await prisma.checkin.findMany({ where: { ...bf, result: 'allowed', checkedInAt: { gte: from, lt: to } }, select: { checkedInAt: true } });
+  const heat = Array.from({ length: 7 }, () => new Array<number>(24).fill(0));
+  for (const c of checkins) {
+    const v = new Date(c.checkedInAt.getTime() + 7 * 3600 * 1000);
+    heat[(v.getUTCDay() + 6) % 7][v.getUTCHours()]++;
+  }
+  res.json({ data: { days: 30, total_checkins: checkins.length, heatmap: heat } });
+});
+
 statsRouter.get('/capacity', authorize('reports.view'), async (req, res) => {
   const bf = branchFilter(req, q.parse(req.query).branch_id);
   const today = dateOnly(todayVN());

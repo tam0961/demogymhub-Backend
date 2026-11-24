@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { audit } from '../../lib/audit';
 import { prisma } from '../../lib/prisma';
 import { authenticate, authorize } from '../../middlewares/auth';
-import { autoMetrics } from './auto';
+import { autoMetrics, marketingOverview } from './auto';
 import { marketingAutoRouter } from './auto-routes';
 
 const SHEET_KEY = 'sheets';
@@ -111,4 +111,9 @@ marketingRouter.put('/ads', authorize('system.manage_settings'), async (req, res
   await prisma.setting.upsert({ where: { key: ADS_KEY }, create: { key: ADS_KEY, value: ads }, update: { value: ads } });
   await audit(req.auth!.userId, 'marketing.ads_saved', { platform: b.platform, token_changed: !!b.token }, req.ip);
   res.json({ data: publicAds(ads) });
+});
+
+marketingRouter.get('/overview', authorize('reports.view'), async (req, res) => {
+  const month = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/).parse(req.query.month ?? new Date(Date.now() + 7 * 3600_000).toISOString().slice(0, 7));
+  res.json({ data: await marketingOverview(month) });
 });

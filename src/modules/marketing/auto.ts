@@ -345,3 +345,107 @@ export function startMarketingJob() {
   timer.unref();
   return () => clearInterval(timer);
 }
+
+/* ---------- overview for the Marketing page: per platform KPIs, daily series, campaigns ---------- */
+interface DayPoint { date: string; spend: number; results: number; form: number; msgs: number }
+interface CampLine { name: string; status: string; kind: string | null; spend: number; results: number }
+export interface AdsPlatformView {
+  has_data: boolean;
+  synced_at: number;
+  spend: number;
+  prev_spend: number;
+  results: number;
+  clicks: number;
+  impressions: number;
+  daily: DayPoint[];
+  campaigns: CampLine[];
+}
+export interface MapsView {
+  has_data: boolean;
+  synced_at: number;
+  data_until: string | null;
+  totals: { views: number; calls: number; directions: number; web: number; msgs: number; bookings: number };
+  prev: { views: number; calls: number; directions: number; web: number };
+  daily: { date: string; maps: number; search: number; calls: number; directions: number; web: number }[];
+  campaigns: CampLine[];
+}
+
+const monthEnd = (month: string) => addDays(`${addDays(`${month}-28`, 4).slice(0, 7)}-01`, -1);
+const prevMonth = (month: string) => addDays(`${month}-01`, -1).slice(0, 7);
+
+export async function marketingOverview(month: string, now = Date.now()) {
+  const today = vnToday(now);
+  const first = `${month}-01`;
+  const last = today < monthEnd(month) ? (today < first ? first : today) : monthEnd(month);
+  const dates: string[] = [];
+  for (let d = first; d <= last && dates.length < 31; d = addDays(d, 1)) dates.push(d);
+  const pm = prevMonth(month);
+  const pFirst = `${pm}-01`;
+  const pLast = addDays(pFirst, Math.min(dates.length, Number(monthEnd(pm).slice(8))) - 1);
+
+  const rows = await prisma.marketingDaily.findMany({
+    where: { date: { gte: dateOnly(pFirst), lte: dateOnly(last) } },
+    include: { campaign: { select: { id: true, name: true, platform: true, kind: true, status: true } } },
+  });
+  const cfg = await getAuto();
+  const gbp = await getGbp();
+
+  const ads = (kind: 'fb' | 'gg' | 'maps'): AdsPlatformView => {
+    const pick = (r: (typeof rows)[number]) => {
+      const isMapCamp = r.campaign.platform !== 'fb' && /map/i.test(r.campaign.kind ?? '');
+      return kind === 'fb' ? r.campaign.platform === 'fb' : kind === 'maps' ? isMapCamp : r.campaign.platform !== 'fb' && !isMapCamp;
+    };
+    const mine = rows.filter(pick);
+    const inMonth = mine.filter((r) => r.date.toISOString().slice(0, 10) >= first);
+    const prev = mine.filter((r) => { const d = r.date.toISOString().slice(0, 10); return d >= pFirst && d <= pLast; });
+    const res = (r: (typeof rows)[number]) => r.leads + r.msgs + Math.round(r.conv);
+    const byDay = new Map<string, DayPoint>(dates.map((d) => [d, { date: d, spend: 0, results: 0, form: 0, msgs: 0 }]));
+    const camps = new Map<string, CampLine>();
+    for (const r of inMonth) {
+      const p = byDay.get(r.date.toISOString().slice(0, 10));
+      if (p) { p.spend += r.spend; p.results += res(r); p.form += r.leads; p.msgs += r.msgs; }
+      const c = camps.get(r.campaign.id) ?? { name: r.campaign.name, status: r.campaign.status, kind: r.campaign.kind, spend: 0, results: 0 };
+      c.spend += r.spend;
+      c.results += res(r);
+      camps.set(r.campaign.id, c);
+    }
+    return {
+      has_data: inMonth.length > 0,
+      synced_at: kind === 'fb' ? cfg.fb.synced : cfg.gg.synced,
+      spend: inMonth.reduce((s, r) => s + r.spend, 0),
+      prev_spend: prev.reduce((s, r) => s + r.spend, 0),
+      results: inMonth.reduce((s, r) => s + res(r), 0),
+      clicks: inMonth.reduce((s, r) => s + r.clicks, 0),
+      impressions: inMonth.reduce((s, r) => s + r.impressions, 0),
+      daily: [...byDay.values()],
+      campaigns: [...camps.values()].sort((a, b) => b.spend - a.spend),
+    };
+  };
+
+  const gDays = dates.map((d) => ({ d, v: gbp.days[d] }));
+  const sum = (from: string, to: string, f: keyof GbpDay) => Object.entries(gbp.days).filter(([d]) => d >= from && d <= to).reduce((s, [, v]) => s + (v[f] ?? 0), 0);
+  const mapsAds = ads('maps');
+  const gbpKeys = Object.keys(gbp.days).filter((d) => d >= first && d <= last).sort();
+  const maps: MapsView = {
+    has_data: gbpKeys.length > 0 || mapsAds.has_data,
+    synced_at: gbp.synced,
+    data_until: gbpKeys.length ? gbpKeys[gbpKeys.length - 1] : null,
+    totals: {
+      views: sum(first, last, 'views_maps') + sum(first, last, 'views_search'),
+      calls: sum(first, last, 'calls'),
+      directions: sum(first, last, 'directions'),
+      web: sum(first, last, 'web'),
+      msgs: sum(first, last, 'msgs'),
+      bookings: sum(first, last, 'bookings'),
+    },
+    prev: {
+      views: sum(pFirst, pLast, 'views_maps') + sum(pFirst, pLast, 'views_search'),
+      calls: sum(pFirst, pLast, 'calls'),
+      directions: sum(pFirst, pLast, 'directions'),
+      web: sum(pFirst, pLast, 'web'),
+    },
+    daily: gDays.map(({ d, v }) => ({ date: d, maps: v?.views_maps ?? 0, search: v?.views_search ?? 0, calls: v?.calls ?? 0, directions: v?.directions ?? 0, web: v?.web ?? 0 })),
+    campaigns: mapsAds.campaigns,
+  };
+  return { month, today, days: dates.length, platforms: { facebook: ads('fb'), google_ads: ads('gg'), maps } };
+}
