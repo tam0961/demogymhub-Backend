@@ -43,12 +43,13 @@ const COL = {
   phone: /(sdt|so dien thoai|dien thoai|phone|zalo|mobile)/,
   email: /(email|mail)/,
   source: /(nguon|source|chien dich|campaign)/,
+  interest: /(goi quan tam|quan tam|goi tap|goi|dich vu|interest|package)/,
   note: /(ghi chu|note|nhu cau|loi nhan|noi dung)/,
 };
 
 /** Sheet columns -> lead fields. Columns not recognised are appended to the note. */
 export function mapLeadFields(fields: Record<string, string>) {
-  const out = { name: '', phone: '', email: '', source: '', note: [] as string[] };
+  const out = { name: '', phone: '', email: '', source: '', interest: '', note: [] as string[] };
   for (const [k, v] of Object.entries(fields)) {
     const val = String(v ?? '').trim();
     if (!val) continue;
@@ -57,6 +58,7 @@ export function mapLeadFields(fields: Record<string, string>) {
     else if (!out.email && COL.email.test(c)) out.email = val;
     else if (!out.name && COL.name.test(c)) out.name = val;
     else if (!out.source && COL.source.test(c)) out.source = val;
+    else if (!out.interest && COL.interest.test(c)) out.interest = val;
     else if (COL.note.test(c)) out.note.push(val);
     else out.note.push(`${k}: ${val}`);
   }
@@ -104,7 +106,7 @@ leadsInboxRouter.post('/in', async (req, res) => {
   const ext = `${item.id}:${b.ext}`;
   if (await prisma.lead.findUnique({ where: { ext }, select: { id: true } })) return res.json({ ok: true, dup: true });
   const lead = await prisma.lead.create({
-    data: { name: (f.name || phone).slice(0, 100), phone, email: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.email) ? f.email.toLowerCase() : null, source: (f.source || 'Google Sheet').slice(0, 100), note: f.note.join(' | ').slice(0, 1000) || null, branchId: item.branch_id, ext },
+    data: { name: (f.name || phone).slice(0, 100), phone, email: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.email) ? f.email.toLowerCase() : null, source: (f.source || 'Google Sheet').slice(0, 100), interest: f.interest ? f.interest.slice(0, 100) : null, note: f.note.join(' | ').slice(0, 1000) || null, branchId: item.branch_id, ext },
   });
   item.last_at = new Date().toISOString();
   await saveInboxKeys(list);

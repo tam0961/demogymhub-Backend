@@ -148,7 +148,10 @@ describe('lead inbox', () => {
   });
 
   it('maps sheet columns to lead fields', () => {
-    expect(mapLeadFields({ 'Họ tên': 'Lan', SĐT: '0901 234 567', Email: 'L@x.vn', Nguồn: 'Facebook', 'Ghi chú': 'muốn tập', Tuổi: '25' })).toEqual({ name: 'Lan', phone: '0901 234 567', email: 'L@x.vn', source: 'Facebook', note: ['muốn tập', 'Tuổi: 25'] });
+    expect(mapLeadFields({ 'Họ tên': 'Lan', SĐT: '0901 234 567', Email: 'L@x.vn', Nguồn: 'Facebook', 'Ghi chú': 'muốn tập', Tuổi: '25' })).toEqual({ name: 'Lan', phone: '0901 234 567', email: 'L@x.vn', source: 'Facebook', interest: '', note: ['muốn tập', 'Tuổi: 25'] });
+  });
+  it('maps the interest package column from the sheet', () => {
+    expect(mapLeadFields({ 'Họ tên': 'Lan', SĐT: '0901234567', 'Gói quan tâm': 'PT 1:1 - 20b' }).interest).toBe('PT 1:1 - 20b');
   });
 
   it('creates a lead in the key branch once, rejects bad keys and rows without a phone', async () => {

@@ -50,6 +50,15 @@ describe('day tickets', () => {
     expect(noShift.body.data.method).toBe('cash');
   });
 
+  it('accepts the last 4 digits of the phone and blocks the same name and digits while inside', async () => {
+    const a = await request(app).post('/api/day-tickets').set(hr()).send({ name: 'Lan', phone: '4821', method: 'cash' });
+    expect(a.status).toBe(201);
+    expect(a.body.data.phone).toBe('4821');
+    expect((await request(app).post('/api/day-tickets').set(hr()).send({ name: 'Lan', phone: '4821', method: 'cash' })).status).toBe(409);
+    expect((await request(app).post('/api/day-tickets').set(hr()).send({ name: 'Mai', phone: '4821', method: 'cash' })).status).toBe(201);
+    expect((await request(app).post('/api/day-tickets').set(hr()).send({ name: 'Lan', phone: '482', method: 'cash' })).status).toBe(400);
+  });
+
   it('blocks a phone that is still inside, allows it again after checkout', async () => {
     const first = await request(app).post('/api/day-tickets').set(hr()).send({ name: 'Hai', phone: ph(4), method: 'card' });
     expect(first.status).toBe(201);

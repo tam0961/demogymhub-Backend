@@ -645,6 +645,7 @@ model Lead {
   phone      String
   email      String?
   source     String?
+  interest   String?
   status     LeadStatus @default(new)
   note       String?
   branchId   String     @map("branch_id") @db.Uuid

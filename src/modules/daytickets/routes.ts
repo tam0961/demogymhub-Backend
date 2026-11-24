@@ -26,7 +26,7 @@ const phone = z
   .string()
   .trim()
   .transform((s) => s.replace(/[\s.\-()]/g, ''))
-  .pipe(z.string().regex(/^\+?\d{9,15}$/, 'invalid phone'));
+  .pipe(z.string().regex(/^(\+?\d{9,15}|\d{4})$/, 'invalid phone'));
 
 const METHOD = { cash: 'cash', transfer: 'transfer', card: 'card', momo: 'ewallet' } as const;
 
@@ -88,7 +88,8 @@ dayTicketsRouter.post('/', authorize('day_tickets.create'), async (req, res) => 
   const branchId = writeBranch(req, b.branch_id ?? b.branch);
   const today = todayVN();
 
-  const member = await prisma.member.findUnique({ where: { phone: b.phone }, select: { id: true, name: true } });
+  const last4 = /^\d{4}$/.test(b.phone);
+  const member = last4 ? null : await prisma.member.findUnique({ where: { phone: b.phone }, select: { id: true, name: true } });
   if (member) {
     const live = await prisma.contract.findFirst({
       where: { memberId: member.id, status: 'active', package: { category: 'member' }, OR: [{ endDate: null }, { endDate: { gte: dateOnly(today) } }] },
@@ -97,7 +98,7 @@ dayTicketsRouter.post('/', authorize('day_tickets.create'), async (req, res) => 
     if (live) throw conflict('MEMBER_HAS_CONTRACT', `Số điện thoại thuộc hội viên ${member.name} đang còn hợp đồng, không bán vé lẻ`);
   }
   const inside = await prisma.dayTicket.findFirst({
-    where: { phone: b.phone, issuedOn: dateOnly(today), checkedOutAt: null, payment: { status: 'confirmed' } },
+    where: { phone: b.phone, ...(last4 ? { name: b.name } : {}), issuedOn: dateOnly(today), checkedOutAt: null, payment: { status: 'confirmed' } },
     select: { id: true },
   });
   if (inside) throw conflict('TICKET_ACTIVE', 'Số điện thoại này đã có vé hôm nay và vẫn đang trong phòng tập');
