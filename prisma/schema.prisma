@@ -646,6 +646,11 @@ model Lead {
   email      String?
   source     String?
   interest   String?
+  ptName       String?    @map("pt_name")
+  outcome      String?
+  callResponse String?    @map("call_response")
+  optionPref   String?    @map("option_pref")
+  regType      String?    @map("reg_type")
   status     LeadStatus @default(new)
   note       String?
   branchId   String     @map("branch_id") @db.Uuid
