@@ -378,6 +378,22 @@ contractsRouter.get('/:id', authorize('contracts.read'), async (req, res) => {
   res.json({ data: contractToApi(c, { branch: c.branch, last_payment_method: lpm.get(c.id) ?? null, user_names: new Map(actors.map((u) => [u.id, u.name])), bundled: c.bundled }) });
 });
 
+contractsRouter.get('/:id/training-history', authorize('contracts.read'), async (req, res) => {
+  const id = uuid.parse(req.params.id);
+  const c = await prisma.contract.findUnique({ where: { id }, include: { package: { select: { category: true, displayGroup: true } } } });
+  if (!c || !branchAllowed(req.access!, c.branchId)) throw notFound('Contract not found');
+  const [pt, grp] = await Promise.all([
+    prisma.ptSession.findMany({ where: { contractId: id, status: 'completed' }, include: { trainer: { select: { name: true } } } }),
+    prisma.groupRegistration.findMany({ where: { contractId: id, status: 'attended' }, include: { class: { include: { trainer: { select: { name: true } } } } } }),
+  ]);
+  const ptKind = c.package.category === 'pt_1on2' ? 'pt_1on2' : 'pt_1on1';
+  const rows = [
+    ...pt.map((s) => ({ id: s.id, kind: ptKind as string, start_at: s.startAt, end_at: s.endAt, completed_at: s.completedAt, trainer: s.trainer.name as string | null, title: ptKind === 'pt_1on2' ? 'PT 1:2' : 'PT 1:1', note: s.note })),
+    ...grp.map((r) => ({ id: r.id, kind: 'group', start_at: r.class.startAt, end_at: r.class.endAt, completed_at: r.class.completedAt, trainer: r.class.trainer?.name ?? null, title: r.class.muscleGroup ?? r.class.title, note: null as string | null })),
+  ].sort((a, b) => b.start_at.getTime() - a.start_at.getTime());
+  res.json({ data: { rows, summary: { sessions_total: c.sessionsTotal, sessions_left: c.sessionsLeft, done: rows.length } } });
+});
+
 contractsRouter.get('/:id/pdf', authorize('contracts.read'), async (req, res) => {
   const id = uuid.parse(req.params.id);
   const c = await prisma.contract.findUnique({ where: { id }, include: { member: true, package: true } });

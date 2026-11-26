@@ -324,7 +324,7 @@ classesRouter.patch('/:id', authorize('pt_sessions.create'), async (req, res) =>
 async function pickGroupContract(tx: Tx, memberId: string, branchId: string) {
   const today = dateOnly(todayVN());
   const candidates = await tx.contract.findMany({
-    where: { memberId, branchId, status: { in: ['active', 'expired'] }, package: { OR: [{ category: 'pt_group' }, { displayGroup: 'pt_group' }] }, sessionsLeft: { gt: 0 } },
+    where: { memberId, branchId, status: { in: ['active', 'expired'] }, startDate: { lte: today }, package: { OR: [{ category: 'pt_group' }, { displayGroup: 'pt_group' }] }, sessionsLeft: { gt: 0 } },
     orderBy: { endDate: { sort: 'asc', nulls: 'last' } },
   });
   for (const c of candidates) {

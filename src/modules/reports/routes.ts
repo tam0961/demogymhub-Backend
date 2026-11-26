@@ -44,6 +44,16 @@ reportsRouter.get('/dashboard', authorize('reports.view'), async (req, res) => {
     byKind[kind] = (byKind[kind] ?? 0) + x.amount;
   }
 
+  const signedToday = await prisma.contract.findMany({
+    where: { ...bf, createdAt: range, status: { not: 'cancelled' } },
+    select: { totalAmount: true, package: { select: { category: true, displayGroup: true } } },
+  });
+  const contractByKind: Record<string, number> = { member: 0, pt_1on1: 0, pt_1on2: 0, pt_group: 0 };
+  for (const c of signedToday) {
+    const kind = c.package.displayGroup === 'pt_group' ? 'pt_group' : c.package.category;
+    contractByKind[kind] = (contractByKind[kind] ?? 0) + c.totalAmount;
+  }
+
   const from7 = addDays(dayStart, -6);
   const pay7 = await prisma.payment.findMany({
     where: { ...bf, status: 'confirmed', confirmedAt: { gte: dayRange(from7.toISOString().slice(0, 10)).gte, lt: range.lt } },
@@ -74,6 +84,8 @@ reportsRouter.get('/dashboard', authorize('reports.view'), async (req, res) => {
       revenue_today: METHODS.reduce((s, m) => s + byMethod[m], 0),
       revenue_by_method: byMethod,
       revenue_by_kind: byKind,
+      contract_value_by_kind: contractByKind,
+      contract_value_today: Object.values(contractByKind).reduce((s, v) => s + v, 0),
       new_contracts_today: newContracts,
       active_members: activeMembers,
       expiring_in_7_days: expiring,
