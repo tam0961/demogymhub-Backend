@@ -175,6 +175,7 @@ ptAppRouter.put('/off', async (req, res) => {
 
 const bookSchema = z.object({
   contract_id: z.string().uuid(),
+  partner_contract_id: z.string().uuid().nullish(),
   start_at: z.string().datetime({ offset: true }),
   duration_min: z.number().int().min(15).max(240).default(60),
   note: z.string().trim().max(500).nullish(),
@@ -182,10 +183,19 @@ const bookSchema = z.object({
 
 ptAppRouter.post('/sessions', async (req, res) => {
   const b = bookSchema.parse(req.body);
-  const c = await prisma.contract.findUnique({ where: { id: b.contract_id }, select: { memberId: true, branchId: true, ptUserId: true } });
+  const own = { select: { memberId: true, branchId: true, ptUserId: true, package: { select: { category: true } } } } as const;
+  const c = await prisma.contract.findUnique({ where: { id: b.contract_id }, ...own });
   if (!c || c.ptUserId !== me(req)) throw notFound('Contract not found');
   if (new Date(b.start_at).getTime() < Date.now() - 3600000) throw badRequest('PAST_TIME', 'Cannot book a session in the past');
-  const created = await createPtSession(req, { member_id: c.memberId, contract_id: b.contract_id, trainer_id: me(req), start_at: b.start_at, duration_min: b.duration_min, note: b.note, branch_id: c.branchId });
+  const pair = c.package.category === 'pt_1on2';
+  if (pair && !b.partner_contract_id) throw badRequest('PAIR_INCOMPLETE', 'A 1-2 session needs a second customer');
+  if (!pair && b.partner_contract_id) throw badRequest('PAIR_NOT_ALLOWED', 'Only a PT 1:2 package can have a second customer');
+  const pc = b.partner_contract_id ? await prisma.contract.findUnique({ where: { id: b.partner_contract_id }, ...own }) : null;
+  if (b.partner_contract_id && (!pc || pc.ptUserId !== me(req) || pc.package.category !== 'pt_1on2')) throw notFound('Contract not found');
+  const created = await createPtSession(req, {
+    member_id: c.memberId, contract_id: b.contract_id, trainer_id: me(req), start_at: b.start_at, duration_min: b.duration_min, note: b.note, branch_id: c.branchId,
+    ...(pc && b.partner_contract_id ? { partner: { member_id: pc.memberId, contract_id: b.partner_contract_id } } : {}),
+  });
   res.status(201).json({ data: { id: created.first.id } });
 });
 
