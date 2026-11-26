@@ -166,7 +166,7 @@ export async function importSheetMembers(rows: SheetMemberRow[], opts: { dryRun:
       await prisma.member.updateMany({ where: { phone: it.phone, OR: [{ email: null }, { email: '' }] }, data: { email: it.email } });
     }
     if (it.action !== 'create') continue;
-    const member = await prisma.member.create({ data: { code: await nextMemberCode(), name: it.name || 'Hội viên', phone: it.phone, email: it.email || null, gender: 'female', branchId } });
+    const member = await prisma.member.create({ data: { code: await nextMemberCode(), name: it.name || 'Hội viên', phone: it.phone, email: it.email || null, gender: 'female', branchId, ...(it.start ? { createdAt: new Date(`${it.start}T00:00:00Z`) } : {}) } });
     counts.created++;
     await audit(opts.createdBy, 'member.created_from_sheet', { phone: it.phone, name: member.name, bulk: true }, undefined, member.id);
     if (it.total <= 0) continue;
