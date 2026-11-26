@@ -20,6 +20,7 @@ import { paymentsRouter } from './modules/payments/routes';
 import { publicRouter } from './modules/pt/public';
 import { ipadPublicRouter, ipadRouter } from './modules/ipad/routes';
 import { ptBotRouter, ptRouter } from './modules/pt/routes';
+import { ptAppRouter } from './modules/ptapp/routes';
 import { reportsRouter } from './modules/reports/routes';
 import { leadsInboxRouter } from './modules/leads/inbox';
 import { leadsRouter } from './modules/leads/routes';
@@ -103,6 +104,7 @@ export function createApp() {
   app.use('/api/public', publicRouter);
   app.use('/api/ipad', ipadRouter);
   app.use('/api/pt/bot', ptBotRouter);
+  app.use('/api/pt-app', ptAppRouter);
   app.use('/api/pt', ptRouter);
   app.use('/api/reports', reportsRouter);
   app.use('/api/mk', mkPublicRouter);
