@@ -72,7 +72,8 @@ async function monthRevenue(month: string, marketingIds: Set<string>): Promise<M
     const v = contribution(p, from, to);
     if (!v || !p.contract) continue;
     const cat = p.contract.package.category;
-    if (cat === 'member') {
+    if (cat === 'pt_group') out.memberTotal += v;
+    else if (cat === 'member') {
       out.memberTotal += v;
       if (p.contract.saleUserId) add(out.memberBySale, p.contract.saleUserId, v);
     } else if (PT_CATEGORIES.includes(cat)) {
