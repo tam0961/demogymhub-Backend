@@ -83,7 +83,6 @@ ptRouter.get('/sessions', authorize('pt_sessions.read'), async (req, res) => {
   if (q.from || q.to) where.startAt = { ...(q.from && { gte: dayRange(q.from).gte }), ...(q.to && { lt: dayRange(q.to).lt }) };
   if (q.status) where.status = q.status;
   if (q.member_id) where.memberId = q.member_id;
-  else where.source = { not: 'sheet_month' };
   where.trainerId = ownOnly(req) ? req.auth!.userId : q.trainer_id;
   const rows = await prisma.ptSession.findMany({ where, include, orderBy: { startAt: 'asc' }, take: 500 });
   res.json({ data: rows.map(toApi) });
@@ -188,7 +187,11 @@ async function loadSession(req: Request) {
   return s;
 }
 
-const assignSchema = z.object({ member_id: z.string().uuid(), contract_id: z.string().uuid().nullish() });
+const assignSchema = z.object({
+  member_id: z.string().uuid(),
+  contract_id: z.string().uuid().nullish(),
+  partner: z.object({ member_id: z.string().uuid(), contract_id: z.string().uuid() }).nullish(),
+});
 
 ptRouter.post('/sessions/:id/assign', async (req, res) => {
   const a = req.access!;
@@ -207,11 +210,30 @@ ptRouter.post('/sessions/:id/assign', async (req, res) => {
       select: { id: true },
     });
     if (clash) throw conflict('MEMBER_BUSY', 'Member already has a session in this time');
-    if (b.contract_id) await checkPtContract(tx, b.member_id, b.contract_id, s.branchId, s.trainerId, 'pt_1on1');
-    return tx.ptSession.update({ where: { id: s.id }, data: { memberId: b.member_id, contractId: b.contract_id ?? null }, include });
+    if (b.partner && !b.contract_id) throw badRequest('PAIR_INCOMPLETE', 'A 1-2 session needs two customers');
+    if (b.partner && b.partner.member_id === b.member_id) throw badRequest('PAIR_DUPLICATE', 'The two customers must be different');
+    if (b.contract_id) await checkPtContract(tx, b.member_id, b.contract_id, s.branchId, s.trainerId, b.partner ? 'pt_1on2' : 'pt_1on1');
+    let second: Prisma.PtSessionGetPayload<{ include: typeof include }> | null = null;
+    if (b.partner) {
+      const pm = await tx.member.findUnique({ where: { id: b.partner.member_id } });
+      if (!pm || pm.branchId !== s.branchId) throw notFound('Member not found');
+      const pClash = await tx.ptSession.findFirst({
+        where: { memberId: b.partner.member_id, status: { in: ['scheduled', 'completed'] }, startAt: { lt: cur.endAt }, endAt: { gt: cur.startAt } },
+        select: { id: true },
+      });
+      if (pClash) throw conflict('MEMBER_BUSY', 'Member already has a session in this time');
+      await checkPtContract(tx, b.partner.member_id, b.partner.contract_id, s.branchId, s.trainerId, 'pt_1on2');
+      second = await tx.ptSession.create({
+        data: { branchId: s.branchId, trainerId: s.trainerId, memberId: b.partner.member_id, contractId: b.partner.contract_id, startAt: cur.startAt, endAt: cur.endAt, source: cur.source, createdBy: req.auth!.userId },
+        include,
+      });
+    }
+    const first = await tx.ptSession.update({ where: { id: s.id }, data: { memberId: b.member_id, contractId: b.contract_id ?? null }, include });
+    return { first, second };
   });
-  await audit(req.auth!.userId, 'pt_session.assigned', { after: toApi(updated) }, req.ip, s.id);
-  res.json({ data: toApi(updated) });
+  await audit(req.auth!.userId, 'pt_session.assigned', { after: toApi(updated.first) }, req.ip, s.id);
+  if (updated.second) await audit(req.auth!.userId, 'pt_session.created', { after: toApi(updated.second) }, req.ip, updated.second.id);
+  res.json({ data: toApi(updated.first), ...(updated.second && { partner: toApi(updated.second) }) });
 });
 
 ptRouter.post('/sessions/:id/complete', authorize('pt_sessions.complete'), async (req, res) => {

@@ -388,8 +388,8 @@ contractsRouter.get('/:id/training-history', authorize('contracts.read'), async 
   ]);
   const ptKind = c.package.category === 'pt_1on2' ? 'pt_1on2' : 'pt_1on1';
   const rows = [
-    ...pt.map((s) => ({ id: s.id, kind: ptKind as string, start_at: s.startAt, end_at: s.endAt, completed_at: s.completedAt, trainer: s.trainer.name as string | null, title: ptKind === 'pt_1on2' ? 'PT 1:2' : 'PT 1:1', note: s.note, month_only: s.source === 'sheet_month' })),
-    ...grp.map((r) => ({ id: r.id, kind: 'group', start_at: r.class.startAt, end_at: r.class.endAt, completed_at: r.class.completedAt, trainer: r.class.trainer?.name ?? null, title: r.class.muscleGroup ?? r.class.title, note: null as string | null, month_only: false })),
+    ...pt.map((s) => ({ id: s.id, kind: ptKind as string, start_at: s.startAt, end_at: s.endAt, completed_at: s.completedAt, trainer: s.trainer.name as string | null, title: ptKind === 'pt_1on2' ? 'PT 1:2' : 'PT 1:1', note: s.note })),
+    ...grp.map((r) => ({ id: r.id, kind: 'group', start_at: r.class.startAt, end_at: r.class.endAt, completed_at: r.class.completedAt, trainer: r.class.trainer?.name ?? null, title: r.class.muscleGroup ?? r.class.title, note: null as string | null })),
   ].sort((a, b) => b.start_at.getTime() - a.start_at.getTime());
   res.json({ data: { rows, summary: { sessions_total: c.sessionsTotal, sessions_left: c.sessionsLeft, done: rows.length } } });
 });
