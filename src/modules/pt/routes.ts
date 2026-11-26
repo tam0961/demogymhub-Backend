@@ -83,6 +83,7 @@ ptRouter.get('/sessions', authorize('pt_sessions.read'), async (req, res) => {
   if (q.from || q.to) where.startAt = { ...(q.from && { gte: dayRange(q.from).gte }), ...(q.to && { lt: dayRange(q.to).lt }) };
   if (q.status) where.status = q.status;
   if (q.member_id) where.memberId = q.member_id;
+  else where.source = { not: 'sheet_month' };
   where.trainerId = ownOnly(req) ? req.auth!.userId : q.trainer_id;
   const rows = await prisma.ptSession.findMany({ where, include, orderBy: { startAt: 'asc' }, take: 500 });
   res.json({ data: rows.map(toApi) });
