@@ -88,6 +88,15 @@ async function nextPt(): Promise<string | null> {
   }
 }
 
+const ptKey = (name: string) => fold(name).replace(/^a\s+/, '');
+
+async function trainerId(ptName: string | null): Promise<string | null> {
+  if (!ptName) return null;
+  const k = ptKey(ptName);
+  const list = await prisma.user.findMany({ where: { status: 'active', userRoles: { some: { role: { key: 'trainer' } } } }, select: { id: true, name: true } });
+  return list.find((u) => fold(u.name).endsWith(k))?.id ?? null;
+}
+
 const normPhone = (p: string) => {
   const d = p.replace(/\D/g, '');
   return d.startsWith('84') && d.length === 11 ? `0${d.slice(2)}` : d;
@@ -130,7 +139,7 @@ leadsInboxRouter.post('/in', async (req, res) => {
   if (await prisma.lead.findUnique({ where: { ext }, select: { id: true } })) return res.json({ ok: true, dup: true });
   const ptName = wantsContact([...f.note, f.interest, ...Object.entries(clean).map(([k, v]) => `${k}: ${v}`)].join(' | ')) ? await nextPt() : null;
   const lead = await prisma.lead.create({
-    data: { ptName, name: (f.name || phone).slice(0, 100), phone, email: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.email) ? f.email.toLowerCase() : null, source: (f.source || 'Google Sheet').slice(0, 100), interest: f.interest ? f.interest.slice(0, 100) : null, note: f.note.join(' | ').slice(0, 1000) || null, branchId: item.branch_id, ext },
+    data: { ptName, assignedTo: await trainerId(ptName), name: (f.name || phone).slice(0, 100), phone, email: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.email) ? f.email.toLowerCase() : null, source: (f.source || 'Google Sheet').slice(0, 100), interest: f.interest ? f.interest.slice(0, 100) : null, note: f.note.join(' | ').slice(0, 1000) || null, branchId: item.branch_id, ext },
   });
   item.last_at = new Date().toISOString();
   await saveInboxKeys(list);
