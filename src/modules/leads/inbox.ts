@@ -65,6 +65,29 @@ export function mapLeadFields(fields: Record<string, string>) {
   return out;
 }
 
+export const PT_ROTATION = ['Trang', 'Thịnh', 'Trang', 'A Khánh'] as const;
+const RR_KEY = 'leads.pt_rr';
+
+export const wantsContact = (text: string) => /toi muon pt|can pt tu van: co/.test(fold(text));
+
+/** Next PT in the fixed rotation Trang, Thịnh, Trang, A Khánh, then again from Trang. */
+async function nextPt(): Promise<string | null> {
+  try {
+    return await prisma.$transaction(
+      async (tx) => {
+        const row = await tx.setting.findUnique({ where: { key: RR_KEY } });
+        const n = Number((row?.value as { n?: number } | null)?.n ?? 0);
+        const value = { n: n + 1 } as unknown as Prisma.InputJsonValue;
+        await tx.setting.upsert({ where: { key: RR_KEY }, create: { key: RR_KEY, value }, update: { value } });
+        return PT_ROTATION[n % PT_ROTATION.length];
+      },
+      { isolationLevel: 'Serializable' },
+    );
+  } catch {
+    return null;
+  }
+}
+
 const normPhone = (p: string) => {
   const d = p.replace(/\D/g, '');
   return d.startsWith('84') && d.length === 11 ? `0${d.slice(2)}` : d;
@@ -105,8 +128,9 @@ leadsInboxRouter.post('/in', async (req, res) => {
   if (!/^\d{9,15}$/.test(phone)) throw new HttpError(422, 'PHONE_REQUIRED', 'The row has no valid phone number');
   const ext = `${item.id}:${b.ext}`;
   if (await prisma.lead.findUnique({ where: { ext }, select: { id: true } })) return res.json({ ok: true, dup: true });
+  const ptName = wantsContact([...f.note, f.interest, ...Object.entries(clean).map(([k, v]) => `${k}: ${v}`)].join(' | ')) ? await nextPt() : null;
   const lead = await prisma.lead.create({
-    data: { name: (f.name || phone).slice(0, 100), phone, email: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.email) ? f.email.toLowerCase() : null, source: (f.source || 'Google Sheet').slice(0, 100), interest: f.interest ? f.interest.slice(0, 100) : null, note: f.note.join(' | ').slice(0, 1000) || null, branchId: item.branch_id, ext },
+    data: { ptName, name: (f.name || phone).slice(0, 100), phone, email: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.email) ? f.email.toLowerCase() : null, source: (f.source || 'Google Sheet').slice(0, 100), interest: f.interest ? f.interest.slice(0, 100) : null, note: f.note.join(' | ').slice(0, 1000) || null, branchId: item.branch_id, ext },
   });
   item.last_at = new Date().toISOString();
   await saveInboxKeys(list);

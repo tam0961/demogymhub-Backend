@@ -3,7 +3,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { prisma } from '../src/lib/prisma';
 import { redis } from '../src/lib/redis';
 import { runFbTick } from '../src/modules/marketing/auto';
-import { mapLeadFields } from '../src/modules/leads/inbox';
+import { PT_ROTATION, mapLeadFields, wantsContact } from '../src/modules/leads/inbox';
 import { app, makeUser, tokenFor } from './helpers';
 
 const sfx = Date.now().toString(36);
@@ -136,6 +136,15 @@ describe('marketing auto', () => {
     expect(all.find((x: { month: string }) => x.month === '2020-05')).toMatchObject({ source: 'manual', spend: 5 });
   });
 });
+
+describe('lead pt rotation', () => {
+  it('cycles Trang, Thịnh, Trang, A Khánh', () => expect([...PT_ROTATION, ...PT_ROTATION]).toEqual(['Trang', 'Thịnh', 'Trang', 'A Khánh', 'Trang', 'Thịnh', 'Trang', 'A Khánh']))
+  it('detects who wants a call', () => {
+    expect(wantsContact('Tùy chọn: Tôi muốn PT liên hệ tư vấn')).toBe(true)
+    expect(wantsContact('Cần PT tư vấn: Có')).toBe(true)
+    expect(wantsContact('Tùy chọn: Tôi không muốn PT liên hệ')).toBe(false)
+  })
+})
 
 describe('lead inbox', () => {
   let key = '';
