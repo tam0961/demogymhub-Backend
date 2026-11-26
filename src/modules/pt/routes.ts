@@ -131,8 +131,9 @@ const createSchema = z.object({
   partner: z.object({ member_id: z.string().uuid(), contract_id: z.string().uuid() }).nullish(),
 });
 
-ptRouter.post('/sessions', authorize('pt_sessions.create'), async (req, res) => {
-  const b = createSchema.parse(req.body);
+export type CreatePtInput = z.infer<typeof createSchema>;
+
+export async function createPtSession(req: Request, b: z.infer<typeof createSchema>) {
   const branchId = writeBranch(req, b.branch_id);
   if (b.contract_id && !b.member_id) throw badRequest('MEMBER_REQUIRED', 'contract_id needs member_id');
   const startAt = new Date(b.start_at);
@@ -171,6 +172,11 @@ ptRouter.post('/sessions', authorize('pt_sessions.create'), async (req, res) => 
   });
   await audit(req.auth!.userId, 'pt_session.created', { after: toApi(created.first) }, req.ip, created.first.id);
   if (created.second) await audit(req.auth!.userId, 'pt_session.created', { after: toApi(created.second) }, req.ip, created.second.id);
+  return created;
+}
+
+ptRouter.post('/sessions', authorize('pt_sessions.create'), async (req, res) => {
+  const created = await createPtSession(req, createSchema.parse(req.body));
   res.status(201).json({ data: toApi(created.first), ...(created.second && { partner: toApi(created.second) }) });
 });
 
