@@ -6,6 +6,7 @@ import { DATE_RE, dateOnly, dayRange, todayVN } from '../../lib/dates';
 import { badRequest, forbidden, notFound } from '../../lib/errors';
 import { prisma } from '../../lib/prisma';
 import { authenticate } from '../../middlewares/auth';
+import { contribution, inRangeWhere, monthRange } from '../payroll/service';
 import { branchFilter } from '../rbac/scope';
 import { createPtSession } from '../pt/routes';
 
@@ -116,7 +117,7 @@ ptAppRouter.get('/classes', async (req, res) => {
       capacity: c.capacity,
       status: c.status,
       registered: c.registrations.length,
-      registrations: c.registrations,
+      registrations: c.trainerId === me(req) ? c.registrations : [],
     })),
   });
 });
@@ -205,6 +206,40 @@ ptAppRouter.patch('/sessions/:id/note', async (req, res) => {
   if (!s || s.trainerId !== me(req)) throw notFound('Session not found');
   await prisma.ptSession.update({ where: { id: s.id }, data: { note: b.note || null } });
   res.json({ data: { id: s.id } });
+});
+
+ptAppRouter.get('/revenue', async (req, res) => {
+  const q = z.object({ month: z.string().regex(/^\d{4}-\d{2}$/).optional() }).parse(req.query);
+  const month = q.month ?? todayVN().slice(0, 7);
+  const { from, to } = monthRange(month);
+  const pays = await prisma.payment.findMany({
+    where: { ...inRangeWhere(from, to), contract: { ...branchFilter(req), saleUserId: me(req) } },
+    select: {
+      amount: true,
+      status: true,
+      confirmedAt: true,
+      refundedAt: true,
+      contract: { select: { package: { select: { category: true, displayGroup: true } } } },
+    },
+  });
+  const sum = { member: 0, pt: 0, group: 0 };
+  for (const p of pays) {
+    const pk = p.contract?.package;
+    const kind = pk?.category === 'pt_group' || pk?.displayGroup === 'pt_group' ? 'group' : pk?.category === 'member' ? 'member' : 'pt';
+    sum[kind] += contribution(p, from, to);
+  }
+  const t = await prisma.setting.findUnique({ where: { key: `work_targets:${month}` } });
+  const target = Number(((t?.value ?? {}) as Record<string, unknown>)[me(req)] ?? 0) || 0;
+  res.json({
+    data: {
+      month,
+      member: sum.member,
+      pt: sum.pt,
+      group: sum.group,
+      total: sum.member + sum.pt + sum.group,
+      kpi: { target, achieved: sum.pt, pct: target > 0 ? Math.round((sum.pt / target) * 1000) / 10 : null },
+    },
+  });
 });
 
 ptAppRouter.get('/performance', async (req, res) => {

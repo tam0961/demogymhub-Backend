@@ -107,6 +107,44 @@ describe('PT app', () => {
     expect((await request(app).patch(`/api/pt-app/sessions/${sessionId}/note`).set(h(t2)).send({ note: 'x' })).status).toBe(404);
   });
 
+  it('hides registrant names and phones on other trainers classes', async () => {
+    const reg = async (classId: string) =>
+      prisma.groupRegistration.create({ data: { classId, memberId, name: 'Hidden Guest', phone: '0911111111', status: 'booked' } });
+    const mineCls = await prisma.groupClass.create({ data: { branchId: nb, trainerId: t1Id, title: 'My class', startAt: new Date('2032-05-11T18:00:00+07:00'), endAt: new Date('2032-05-11T19:00:00+07:00'), capacity: 10 } });
+    const otherCls = await prisma.groupClass.create({ data: { branchId: nb, trainerId: t2Id, title: 'Other class', startAt: new Date('2032-05-11T20:00:00+07:00'), endAt: new Date('2032-05-11T21:00:00+07:00'), capacity: 10 } });
+    await reg(mineCls.id);
+    await reg(otherCls.id);
+    const r = await request(app).get('/api/pt-app/classes?from=2032-05-11&to=2032-05-11').set(h(t1));
+    const by = (t: string) => r.body.data.find((c: { title: string }) => c.title === t);
+    expect(by('My class').registrations).toHaveLength(1);
+    expect(by('Other class').registered).toBe(1);
+    expect(by('Other class').registrations).toEqual([]);
+  });
+
+  it('reports my revenue by seller, split by package kind, with KPI progress', async () => {
+    const id = u();
+    const month = new Date().toISOString().slice(0, 7);
+    const pk = (name: string, data: object) => prisma.package.create({ data: { name: `${name}${id}`, type: 'session', sessions: 10, price: 1000, branchId: nb, ...data } as never });
+    const pt = await pk('RevPT', { category: 'pt_1on1' });
+    const mem = await pk('RevMem', { category: 'member', type: 'month', durationDays: 30, sessions: null });
+    const grp = await pk('RevGrp', { category: 'member', displayGroup: 'pt_group', type: 'month', durationDays: 30, sessions: 8 });
+    const mk = async (code: string, packageId: string, saleUserId: string | null, amount: number) => {
+      const c = await prisma.contract.create({ data: { memberId, branchId: nb, status: 'active', totalAmount: amount, code: `${code}${id}`, packageId, saleUserId, ptUserId: t1Id } });
+      await prisma.payment.create({ data: { contractId: c.id, branchId: nb, method: 'cash', amount, status: 'confirmed', ref: `rv-${code}-${id}`, confirmedAt: new Date() } });
+    };
+    await mk('RP', pt.id, t1Id, 700);
+    await mk('RM', mem.id, t1Id, 300);
+    await mk('RG', grp.id, t1Id, 200);
+    await mk('RO', pt.id, t2Id, 5000);
+    await mk('RN', pt.id, null, 9000);
+    await prisma.setting.upsert({ where: { key: `work_targets:${month}` }, update: { value: { [t1Id]: 1400 } }, create: { key: `work_targets:${month}`, value: { [t1Id]: 1400 } } });
+    const r = await request(app).get('/api/pt-app/revenue').set(h(t1));
+    expect(r.status).toBe(200);
+    expect(r.body.data).toMatchObject({ pt: 700, member: 300, group: 200, total: 1200 });
+    expect(r.body.data.kpi).toEqual({ target: 1400, achieved: 700, pct: 50 });
+    expect((await request(app).get('/api/pt-app/revenue').set(h(reception))).status).toBe(403);
+  });
+
   it('computes my performance', async () => {
     const r = await request(app).get('/api/pt-app/performance').set(h(t1));
     expect(r.status).toBe(200);
