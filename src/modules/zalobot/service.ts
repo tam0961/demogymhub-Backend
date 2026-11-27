@@ -68,10 +68,11 @@ export interface OffItem {
   kind: 'days' | 'none' | 'empty';
 }
 
-/** Messages sent on Saturday or Sunday are for the coming week, otherwise for the current one. */
+/** Messages sent from Thursday to Sunday are for the coming week, Monday to Wednesday for the current one. */
 export function offWeekOf(sentAt: Date): string {
   const p = vnParts(sentAt);
-  return weekStart(p.dow === 0 ? addDays(p.date, 1) : p.dow === 6 ? addDays(p.date, 2) : p.date);
+  const next = p.dow === 0 ? addDays(p.date, 1) : p.dow >= 4 ? addDays(p.date, 8 - p.dow) : p.date;
+  return weekStart(next);
 }
 
 /** "LỊCH OFF" message: lines like "1/ Thịnh: off thứ 3, 4". A name with nothing after the colon is not reported yet. Days 2..7 = Mon..Sat, 8 = Sunday. */

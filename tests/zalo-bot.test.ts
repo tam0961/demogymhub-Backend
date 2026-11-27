@@ -67,6 +67,9 @@ describe('parseOffMessage', () => {
       { name: 'Trang', days: [4, 5], kind: 'days' },
     ]);
     expect(parseOffMessage('LỊCH OFF\n1/ Trang: off thứ 4', new Date('2026-11-18T10:00:00+07:00'))?.week).toBe('2026-11-16');
+    expect(parseOffMessage('LỊCH OFF\n1/ Trang: off thứ 2', new Date('2026-11-26T17:58:00+07:00'))?.week).toBe('2026-11-30');
+    expect(parseOffMessage('LỊCH OFF\n1/ Trang: off thứ 2', new Date('2026-11-27T09:00:00+07:00'))?.week).toBe('2026-11-30');
+    expect(parseOffMessage('LỊCH OFF\n1/ Trang: off thứ 2', new Date('2026-11-29T09:00:00+07:00'))?.week).toBe('2026-11-30');
   });
 });
 
