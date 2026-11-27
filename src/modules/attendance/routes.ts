@@ -251,7 +251,7 @@ async function scanMemberView(memberId: string, branchId: string, todayStr: stri
   const photo = await prisma.memberPhoto.findUnique({ where: { memberId: m.id }, select: { updatedAt: true } });
   const contracts = await prisma.contract.findMany({
     where: { memberId: m.id, status: { notIn: ['draft', 'cancelled'] } },
-    select: { id: true, code: true, status: true, totalAmount: true, paidAmount: true, endDate: true, startDate: true, paymentDueDate: true, sessionsTotal: true, sessionsLeft: true, package: { select: { name: true, category: true, checkinBefore: true } }, packageName: true },
+    select: { id: true, code: true, status: true, totalAmount: true, paidAmount: true, endDate: true, startDate: true, paymentDueDate: true, sessionsTotal: true, sessionsLeft: true, ptName: true, package: { select: { name: true, category: true, checkinBefore: true } }, packageName: true },
     orderBy: [{ endDate: { sort: 'desc', nulls: 'first' } }],
   });
   const mc = contracts.find((c) => c.package.category === 'member');
@@ -259,6 +259,11 @@ async function scanMemberView(memberId: string, branchId: string, todayStr: stri
   const debtC = contracts.filter((c) => c.totalAmount > c.paidAmount).sort((a, b) => b.totalAmount - b.paidAmount - (a.totalAmount - a.paidAmount))[0];
   const ptC = contracts.find((c) => c.package.category !== 'member' && c.sessionsTotal != null && c.status !== 'expired');
   const branch = await prisma.branch.findUnique({ where: { id: branchId }, select: { code: true, name: true } });
+  const lastIn = await prisma.checkin.findFirst({ where: { memberId: m.id, result: 'allowed', checkedInAt: { lt: new Date(`${todayStr}T00:00:00+07:00`) } }, orderBy: { checkedInAt: 'desc' }, select: { checkedInAt: true } });
+  const outsideWhere = mc ? { memberId: m.id, contractId: mc.id, reason: 'OUTSIDE_HOURS' } : null;
+  const [outsideCount, outsideRows] = outsideWhere
+    ? await Promise.all([prisma.checkin.count({ where: outsideWhere }), prisma.checkin.findMany({ where: outsideWhere, orderBy: { checkedInAt: 'desc' }, take: 5, select: { checkedInAt: true } })])
+    : [0, []];
   const endStr = mc?.endDate ? mc.endDate.toISOString().slice(0, 10) : null;
   const state = !mc ? 'no_package' : mc.status === 'frozen' ? 'frozen' : mc.status === 'expired' || (endStr && endStr < todayStr) ? 'expired' : mc.startDate && mc.startDate.toISOString().slice(0, 10) > todayStr ? 'not_started' : 'ok';
   return {
@@ -277,8 +282,11 @@ async function scanMemberView(memberId: string, branchId: string, todayStr: stri
       branch,
       contract_id: mc?.id ?? null,
       checkin_before: mc?.package.checkinBefore ?? null,
+      last_checkin_at: lastIn ? lastIn.checkedInAt.toISOString() : null,
+      outside_count: outsideCount,
+      outside_at: outsideRows.map((r) => r.checkedInAt.toISOString()),
       debt_contract: debtC ? { id: debtC.id, code: debtC.code, amount: debtC.totalAmount - debtC.paidAmount, due_date: fmtDate(debtC.paymentDueDate), overdue_days: overdueDays(debtC, todayStr) } : null,
-      pt: ptC ? { package_name: ptC.packageName ?? ptC.package.name, sessions_left: ptC.sessionsLeft, sessions_total: ptC.sessionsTotal } : null,
+      pt: ptC ? { package_name: ptC.packageName ?? ptC.package.name, sessions_left: ptC.sessionsLeft, sessions_total: ptC.sessionsTotal, pt_name: ptC.ptName } : null,
   };
 }
 
