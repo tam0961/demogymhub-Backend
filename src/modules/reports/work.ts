@@ -81,15 +81,16 @@ workRouter.get('/', authorize('reports.view'), async (req, res) => {
   const prevM = histMonths[histMonths.length - 1];
 
   const ptContract: Prisma.ContractWhereInput = { ...bf, ptUserId: { in: ids }, package: { category: { in: [...PT_CATEGORIES] } } };
+  const saleContract: Prisma.ContractWhereInput = { ...bf, saleUserId: { in: ids }, package: { category: { in: [...PT_CATEGORIES] } } };
   const [targets, pays, created, sessions, leads, active] = await Promise.all([
     loadTargets([...histMonths.map((h) => targetKey(h.y, h.m)), targetKey(p.year, p.month)]),
     prisma.payment.findMany({
-      where: { ...inRangeWhere(histFrom, to), contract: ptContract },
-      select: { amount: true, status: true, confirmedAt: true, refundedAt: true, contract: { select: { ptUserId: true, renewedFromId: true } } },
+      where: { ...inRangeWhere(histFrom, to), contract: saleContract },
+      select: { amount: true, status: true, confirmedAt: true, refundedAt: true, contract: { select: { saleUserId: true, renewedFromId: true } } },
     }),
     prisma.contract.findMany({
-      where: { ...ptContract, createdAt: { gte: from, lt: to }, status: { notIn: ['cancelled', 'draft'] } },
-      select: { ptUserId: true, renewedFromId: true },
+      where: { ...saleContract, createdAt: { gte: from, lt: to }, status: { notIn: ['cancelled', 'draft'] } },
+      select: { saleUserId: true, renewedFromId: true },
     }),
     prisma.ptSession.findMany({
       where: { ...bf, trainerId: { in: ids }, startAt: { gte: from, lt: to } },
@@ -128,7 +129,7 @@ workRouter.get('/', authorize('reports.view'), async (req, res) => {
   const histTotal = new Map<string, number>();
   const daily = Array.from({ length: elapsed }, (_, i) => ({ day: i + 1, dow: new Date(Date.UTC(p.year, p.month - 1, i + 1)).getUTCDay(), sessions: 0, cancelled: 0, revenue: 0 }));
   for (const pay of pays) {
-    const pt = pay.contract?.ptUserId;
+    const pt = pay.contract?.saleUserId;
     if (!pt) continue;
     const parts: [Date | null, number][] = [];
     if (pay.status === 'confirmed' || pay.status === 'refunded') parts.push([pay.confirmedAt, pay.amount]);
@@ -156,7 +157,7 @@ workRouter.get('/', authorize('reports.view'), async (req, res) => {
   const cRenew = new Map<string, number>();
   for (const c of created) {
     const m = c.renewedFromId ? cRenew : cNew;
-    m.set(c.ptUserId!, (m.get(c.ptUserId!) ?? 0) + 1);
+    m.set(c.saleUserId!, (m.get(c.saleUserId!) ?? 0) + 1);
   }
   const sess = new Map<string, { booked: number; cancelled: number; done: number }>();
   const hourCount = new Map<number, number>();
@@ -221,7 +222,7 @@ workRouter.get('/', authorize('reports.view'), async (req, res) => {
     return { label: `T${h.m}`, actual: sum((id) => histTotal.get(`${k}|${id}`) ?? 0), target: sum((id) => num(tg[id])) };
   });
   const pk = ymKey(prevM.y, prevM.m);
-  const prevPays = pays.filter((x) => x.contract?.ptUserId && scope.includes(x.contract.ptUserId));
+  const prevPays = pays.filter((x) => x.contract?.saleUserId && scope.includes(x.contract.saleUserId));
   const prevRange = monthRange(pk);
   const prev = { total: 0, new_sales: 0, renew_sales: 0 };
   for (const pay of prevPays) {
