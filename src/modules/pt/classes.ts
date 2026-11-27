@@ -432,7 +432,8 @@ classesRouter.post('/:id/complete', authorize('pt_sessions.complete'), async (re
   const cls = await loadClass(req);
   if (ownOnly(req) && cls.trainer?.id !== req.auth!.userId) throw forbidden('Not your class');
   if (!cls.trainer) throw conflict('NO_TRAINER', 'Assign a trainer before completing the class');
-  if (vnDayOf(cls.startAt) > todayVN()) throw conflict('FUTURE_CLASS', 'Chỉ hoàn thành được buổi dạy trong ngày, không hoàn thành buổi ở tương lai');
+  const admin = req.access!.roles.some((r) => LOCK_OVERRIDE_ROLES.includes(r));
+  if (!admin && vnDayOf(cls.startAt) !== todayVN()) throw conflict('NOT_TODAY', 'Chỉ hoàn thành được buổi dạy trong ngày hôm đó');
   const out = await prisma.$transaction(async (tx) => {
     await lockKey(tx, 'class:' + cls.id);
     const flip = await tx.groupClass.updateMany({ where: { id: cls.id, status: 'scheduled' }, data: { status: 'completed', completedAt: new Date() } });
@@ -451,7 +452,7 @@ classesRouter.post('/registrations/:id/attendance', authorize('pt_sessions.compl
   const b = attendanceSchema.parse(req.body);
   const found = await prisma.groupRegistration.findUnique({ where: { id }, include: { class: { select: { branchId: true, trainerId: true, status: true } } } });
   if (!found || !branchAllowed(req.access!, found.class.branchId)) throw notFound('Registration not found');
-  if (ownOnly(req) && found.class.trainerId !== req.auth!.userId) throw forbidden('Not your class');
+  if (!req.access!.roles.some((r) => LOCK_OVERRIDE_ROLES.includes(r))) throw forbidden('Chỉ quản lý được sửa điểm danh, mặc định khách có mặt');
   if (found.class.status === 'cancelled') throw conflict('CLASS_CANCELLED', 'Class was cancelled');
   const out = await prisma.$transaction(async (tx) => {
     await lockKey(tx, 'class:' + found.classId);

@@ -6,6 +6,7 @@ import { app, branchId, makeUser, tokenFor } from './helpers';
 let nb: string;
 let reception: string;
 let trainerTok: string;
+let managerTok: string;
 let trainerId: string;
 let memberId: string;
 let contractId: string;
@@ -22,6 +23,8 @@ beforeAll(async () => {
   const id = u();
   await makeUser(`gr${id}@t.local`, 'receptionist', 'nb');
   trainerId = (await makeUser(`gt${id}@t.local`, 'trainer', 'nb')).id;
+  await makeUser(`gm${id}@t.local`, 'branch_manager', 'nb');
+  managerTok = await tokenFor(`gm${id}@t.local`);
   reception = await tokenFor(`gr${id}@t.local`);
   trainerTok = await tokenFor(`gt${id}@t.local`);
   memberId = (await prisma.member.create({ data: { code: `G${id}`, name: 'Group Member', phone: `08${id.replace(/\D/g, '').padEnd(8, '2').slice(0, 8)}`, branchId: nb } })).id;
@@ -43,15 +46,18 @@ describe('PT group package that is a member package', () => {
     expect(reg.status).toBe(201);
     expect(await left()).toBe(1);
 
-    const absent = await request(app).post(`/api/pt/classes/registrations/${reg.body.data.id}/attendance`).set(h(trainerTok)).send({ status: 'absent' });
+    expect((await request(app).post(`/api/pt/classes/registrations/${reg.body.data.id}/attendance`).set(h(trainerTok)).send({ status: 'absent' })).status).toBe(403);
+    const absent = await request(app).post(`/api/pt/classes/registrations/${reg.body.data.id}/attendance`).set(h(managerTok)).send({ status: 'absent' });
     expect(absent.status).toBe(200);
     expect(absent.body.data.status).toBe('absent');
     expect(await left()).toBe(1);
     expect((await request(app).post(`/api/pt/classes/registrations/${reg.body.data.id}/cancel`).set(h(reception))).status).toBe(409);
-    const back = await request(app).post(`/api/pt/classes/registrations/${reg.body.data.id}/attendance`).set(h(trainerTok)).send({ status: 'attended' });
+    const back = await request(app).post(`/api/pt/classes/registrations/${reg.body.data.id}/attendance`).set(h(managerTok)).send({ status: 'attended' });
     expect(back.body.data.status).toBe('attended');
     await prisma.groupClass.update({ where: { id: cls }, data: { startAt: new Date() } });
     expect((await request(app).post(`/api/pt/classes/${cls}/complete`).set(h(trainerTok))).status).toBe(200);
+    const old = await mkClass();
+    expect((await request(app).post(`/api/pt/classes/${old}/complete`).set(h(trainerTok))).body.error.code).toBe('NOT_TODAY');
   });
 
   it('cancelling before the class refunds the session; no sessions left blocks registration but not check-in', async () => {

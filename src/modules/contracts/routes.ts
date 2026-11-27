@@ -218,6 +218,22 @@ contractsRouter.patch('/:id/staff', authorize('contracts.create'), async (req, r
   res.json({ data: contractToApi(out) });
 });
 
+const TERMS_KEY = 'contract_terms_url';
+
+contractsRouter.get('/terms-url', authorize('contracts.read'), async (_req, res) => {
+  const row = await prisma.setting.findUnique({ where: { key: TERMS_KEY } });
+  const v = row?.value as { url?: string } | null;
+  res.json({ data: { url: typeof v?.url === 'string' ? v.url : '' } });
+});
+
+contractsRouter.put('/terms-url', authorize('system.manage_settings'), async (req, res) => {
+  const b = z.object({ url: z.string().trim().max(500).refine((u) => u === '' || /^https?:\/\/\S+$/i.test(u), 'URL phải bắt đầu bằng http:// hoặc https://') }).parse(req.body);
+  const value = { url: b.url } as unknown as Prisma.InputJsonValue;
+  await prisma.setting.upsert({ where: { key: TERMS_KEY }, create: { key: TERMS_KEY, value }, update: { value } });
+  await audit(req.auth!.userId, 'contract.terms_url_changed', { url: b.url }, req.ip);
+  res.json({ data: { url: b.url } });
+});
+
 contractsRouter.get('/pt-staff', authorize('contracts.read'), async (req, res) => {
   const q = z.object({ branch_id: uuid.optional() }).parse(req.query);
   if (q.branch_id) {

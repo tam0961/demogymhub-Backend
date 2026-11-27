@@ -59,7 +59,7 @@ describe('pt sessions', () => {
 
     const future = await request(app).post(`/api/pt/sessions/${a.body.data.id}/complete`).set(h(trainerTok));
     expect(future.status).toBe(409);
-    expect(future.body.error.code).toBe('FUTURE_SESSION');
+    expect(future.body.error.code).toBe('NOT_TODAY');
     const now = new Date();
     await prisma.ptSession.update({ where: { id: a.body.data.id }, data: { startAt: now, endAt: new Date(now.getTime() + 3600000) } });
     const done = await request(app).post(`/api/pt/sessions/${a.body.data.id}/complete`).set(h(trainerTok));

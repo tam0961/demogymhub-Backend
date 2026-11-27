@@ -240,7 +240,7 @@ ptRouter.post('/sessions/:id/complete', authorize('pt_sessions.complete'), async
   const s = await loadSession(req);
   if (ownOnly(req) && s.trainerId !== req.auth!.userId) throw forbidden('Not your session');
   if (!s.memberId) throw conflict('NO_MEMBER', 'Assign a member before completing the session');
-  if (vnDayOf(s.startAt) > todayVN()) throw conflict('FUTURE_SESSION', 'Chỉ hoàn thành được buổi dạy trong ngày, không hoàn thành buổi ở tương lai');
+  if (!req.access!.roles.some((r) => CANCEL_OVERRIDE_ROLES.includes(r)) && vnDayOf(s.startAt) !== todayVN()) throw conflict('NOT_TODAY', 'Chỉ hoàn thành được buổi dạy trong ngày hôm đó');
   const elig = await ptEligibility(s.memberId);
   if (s.contractId && !elig.eligible) throw conflict('NOT_ELIGIBLE', 'Member package or PT package is no longer usable');
   const done = await prisma.$transaction(async (tx) => {
