@@ -38,6 +38,22 @@ describe('receptionist permission toggles', () => {
     expect(off.body.data.find((r: { key: string }) => r.key === 'receptionist').permissions).not.toContain('reports.view');
   });
 
+  it('owner can grant branch revenue to the receptionist, seed keeps it', async () => {
+    const ok = await request(app).put('/api/roles/receptionist/permissions').set(auth('owner')).send({ permissions: ['reports.view', 'reports.view_revenue'] });
+    expect(ok.status).toBe(200);
+    await seedRbac(prisma);
+    const roles = await request(app).get('/api/roles').set(auth('owner'));
+    expect(roles.body.data.find((r: { key: string }) => r.key === 'receptionist').permissions).toEqual(expect.arrayContaining(['reports.view', 'reports.view_revenue']));
+    await request(app).put('/api/roles/receptionist/permissions').set(auth('owner')).send({ permissions: [] }).expect(200);
+  });
+
+  it('owner has full lead permissions, trainer has none', async () => {
+    const roles = await request(app).get('/api/roles').set(auth('owner'));
+    const perms = (k: string) => roles.body.data.find((r: { key: string }) => r.key === k).permissions as string[];
+    expect(perms('owner')).toEqual(expect.arrayContaining(['leads.create', 'leads.read', 'leads.update', 'leads.delete']));
+    expect(perms('trainer').some((p) => p.startsWith('leads.'))).toBe(false);
+  });
+
   it('login scope lists only owner and receptionist accounts', async () => {
     const res = await request(app).get('/api/users').query({ scope: 'login', limit: 100 }).set(auth('owner'));
     expect(res.status).toBe(200);

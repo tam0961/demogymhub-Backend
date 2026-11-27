@@ -71,6 +71,7 @@ export const ROLES: RoleDef[] = [
       ...expand('members', CRUD),
       ...expand('packages', ['create', 'read', 'update']),
       ...expand('reports', ['view', 'view_revenue', 'export']),
+      ...expand('leads', CRUD),
       ...OWNER_OPS,
       'payments.refund',
       'roles.read',
@@ -180,4 +181,5 @@ export const RECEPTIONIST_TOGGLES = [
   'packages.create',
   'packages.update',
   'reports.view',
+  'reports.view_revenue',
 ];
